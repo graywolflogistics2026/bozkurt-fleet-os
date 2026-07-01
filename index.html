@@ -369,6 +369,7 @@ canvas{max-height:160px;}
           <button class="btn" onclick="addOwnerDraw()" style="margin-top:10px;width:100%">💸 Record Owner's Draw</button>
           <button onclick="updateBizBalance()" style="margin-top:6px;width:100%;background:var(--card2);border:1px solid var(--bor);color:var(--txt);padding:7px;border-radius:7px;font-size:12px;cursor:pointer">🏦 Update Business Balance</button>
           <button onclick="cleanupOrphanedContributions(false)" style="margin-top:6px;width:100%;background:var(--card2);border:1px solid var(--bor);color:var(--mut);padding:7px;border-radius:7px;font-size:11px;cursor:pointer">🧹 Clean Up Orphaned Contributions</button>
+          <button onclick="cleanupStaleDocs(false)" style="margin-top:6px;width:100%;background:var(--card2);border:1px solid var(--bor);color:var(--mut);padding:7px;border-radius:7px;font-size:11px;cursor:pointer">🧹 Clean Up False "Duplicate" Warnings</button>
         </div>
         <div class="card">
           <div class="ct">History</div>
@@ -1010,6 +1011,25 @@ function cleanupOrphanedContributions(silent){
   if(!silent)alert(removed>0?('✅ Cleaned up '+removed+' orphaned contribution(s) with no matching deduction.'):'✅ Nothing to clean — every contribution is linked to a real deduction.');
   return removed;
 }
+// Removes DB.docs entries (used only for duplicate-import detection) that no longer have any
+// matching real record — e.g. after deleting deductions/settlements/maintenance manually.
+// Without this, re-importing the same document falsely triggers "possible duplicate" warnings
+// even though the original data is gone.
+function cleanupStaleDocs(silent){
+  const before=DB.docs.length;
+  DB.docs=DB.docs.filter(doc=>{
+    if(doc.docType==='settlement')return DB.sett.some(s=>s.date===doc.date);
+    if(doc.docType==='fuel')return DB.fuel.tr.some(f=>f.date===doc.date)||DB.fuel.re.some(f=>f.date===doc.date);
+    if(doc.docType==='maintenance')return DB.maint.some(m=>m.date===doc.date);
+    if(doc.docType==='toll')return DB.tolls.ez.some(t=>t.date===doc.date)||DB.tolls.dw.some(t=>t.date===doc.date);
+    if(doc.docType==='loan')return true;
+    return DB.ded.some(x=>x.date===doc.date);
+  });
+  const removed=before-DB.docs.length;
+  saveDB();
+  if(!silent)alert(removed>0?('✅ Cleaned up '+removed+' stale document record(s) — re-importing them will no longer show a false duplicate warning.'):'✅ Nothing to clean — every document record matches real data.');
+  return removed;
+}
 const CARDS=JSON.parse(localStorage.getItem('gw_cards')||'[]');
 const ASSETS2=JSON.parse(localStorage.getItem('gw_assets')||'[]');
 let PENDING=null,chartInst=null,arActiveFilter='all';
@@ -1612,6 +1632,7 @@ function deleteDed(i){
   if(x&&x.id)removeContribution(x.id);
   DB.ded.splice(i,1);
   saveDB();rDed();rDash();
+  try{cleanupStaleDocs(true);}catch(e){}
 }
 function saveManualDed(){
   const desc=$('md-desc').value;
@@ -1813,6 +1834,7 @@ function deleteEquipItem(i){
   if(x&&x.id)removeContribution(x.id);
   DB.ded.splice(i,1);
   saveDB();rAreg();rDash();
+  try{cleanupStaleDocs(true);}catch(e){}
 }
 
 function editEquipItem(i){
@@ -1980,6 +2002,7 @@ function importData(file){
       try{reclassifyMaint(true);}catch(e){}
       try{syncHealthFromMaint(true);}catch(e){}
       try{cleanupOrphanedContributions(true);}catch(e){}
+      try{cleanupStaleDocs(true);}catch(e){}
       alert('✅ Restored! Settlements, deductions, maintenance history, Truck Health, Capital Account (draws & contributions), business balance, cards, loans, and bank/checking statements are all back.');
     }catch(err){alert('❌ Error: '+err.message);}
   };
@@ -2452,6 +2475,7 @@ window.addEventListener('load',()=>{
   try{reclassifyMaint(true);}catch(e){console.error('reclassify:',e);}
   try{syncHealthFromMaint(true);}catch(e){console.error('health-sync:',e);}
   try{cleanupOrphanedContributions(true);}catch(e){console.error('contrib-cleanup:',e);}
+  try{cleanupStaleDocs(true);}catch(e){console.error('docs-cleanup:',e);}
   try{initGoogleAuth();}catch(e){console.error('google-auth-init:',e);}
   const h=JSON.parse(localStorage.getItem('gw_health')||'{}');
   if(h.odo)try{rHealth(h);}catch(e){}
