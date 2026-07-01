@@ -146,6 +146,7 @@ canvas{max-height:160px;}
   <div class="suser"><div class="sav">AB</div><div class="sui">Ali Bozkurt<small>Graywolf Logistics</small></div></div>
 </div>
 <div id="main">
+  <div id="readonly-banner" style="display:none;background:var(--org);color:#000;padding:6px 18px;align-items:center;gap:8px;font-size:12px;font-weight:600">👀 View-Only Mode — you're looking, not editing. Ask the owner for changes.</div>
   <div id="topbar">
     <div><h1 id="ptitle">Dashboard</h1><p id="psub">Overview of your fleet and business</p></div>
     <div class="tbr">
@@ -171,7 +172,7 @@ canvas{max-height:160px;}
         <div class="sc"><div class="sl">Avg Net/Week</div><div class="sv" id="d-avgnet">$0.00</div><div class="sch">direct deposit avg</div></div>
       </div>
       <div class="g4" style="margin-bottom:12px">
-        <div class="sc"><div class="sl">Business Balance</div><div class="sv ta" id="d-bizbal">$58,970.00</div><div class="sch">checking account</div></div>
+        <div class="sc"><div class="sl">Business Balance</div><div class="sv ta" id="d-bizbal">$60,000.00</div><div class="sch">checking account</div></div>
       </div>
 
       <div class="g4" style="margin-bottom:12px">
@@ -826,6 +827,15 @@ canvas{max-height:160px;}
         <div id="biz-msg" style="display:none;padding:9px;border-radius:7px;font-size:12px;background:var(--card2);margin-top:8px"></div>
       </div>
       <div class="card">
+        <div class="ct">👀 View-Only Mode</div>
+        <p style="color:var(--mut);font-size:12px;margin-bottom:12px">Turn this ON <b>only on the device you're sharing with</b> (e.g. your spouse's phone) — it disables every save/delete/import button so they can look but not change anything. This setting is local to this device/browser and does not affect your own data or other devices.</p>
+        <div id="readonly-status" style="margin-bottom:10px"></div>
+        <div style="display:flex;gap:8px">
+          <button onclick="setReadOnly(true)" style="background:rgba(245,158,11,.12);border:1px solid var(--org);color:var(--org);padding:7px 14px;border-radius:7px;font-size:12px;cursor:pointer;font-weight:600">👀 Turn ON View-Only</button>
+          <button onclick="setReadOnly(false)" style="background:var(--card2);border:1px solid var(--bor);color:var(--txt);padding:7px 14px;border-radius:7px;font-size:12px;cursor:pointer">✏️ Turn OFF (allow edits)</button>
+        </div>
+      </div>
+      <div class="card">
         <div class="ct">⚙️ API Key — Required for PDF Import</div>
         <p style="color:var(--mut);font-size:12px;margin-bottom:14px">Your key is stored only on this PC. Get one free at <b style="color:var(--acc)">console.anthropic.com</b></p>
         <div style="margin-bottom:12px"><div class="fl" style="margin-bottom:5px">Anthropic API Key</div><input type="password" id="apikey" class="fi" placeholder="sk-ant-api03-..."></div>
@@ -977,6 +987,7 @@ function syncContributionForDeduction(ded){
   }
 }
 function updateBizBalance(){
+  if(guardReadOnly())return;
   const bal=parseFloat(prompt('Current business account balance ($):'));
   if(isNaN(bal)||bal<0)return;
   localStorage.setItem('gw_bizbal',bal.toString());
@@ -984,6 +995,7 @@ function updateBizBalance(){
   alert('✅ Business balance updated: '+fmt(bal));
 }
 function addOwnerDraw(){
+  if(guardReadOnly())return;
   const amt=parseFloat(prompt('Owner\'s Draw amount ($):'));
   if(!amt||amt<=0)return;
   const note=prompt('Note (optional):')||'';
@@ -993,6 +1005,7 @@ function addOwnerDraw(){
   alert('✅ Draw recorded: '+fmt(amt));
 }
 function deleteDraw(id){
+  if(guardReadOnly())return;
   if(!confirm('Delete this draw record? (Made a typo? This is how to fix it.)'))return;
   CAPITAL.draws=CAPITAL.draws.filter(d=>d.id!==id);
   saveDraws();
@@ -1064,6 +1077,29 @@ function orgFolderName(dt,vendor){
   return 'Other';
 }
 function autoSaveEnabled(){return localStorage.getItem('gw_autosave')!=='0';}
+
+// ═══ VIEW-ONLY MODE ═══
+// A device-local toggle (does NOT affect the owner's own browser/data) that blocks every
+// data-changing action while leaving all dashboards/reports fully viewable. Meant for sharing
+// this same link with someone (e.g. spouse) who should be able to look but not edit — they get
+// their own copy of the data via Import Backup, then this mode is turned on on THEIR device.
+function isReadOnly(){return localStorage.getItem('gw_readonly')==='1';}
+function guardReadOnly(){
+  if(isReadOnly()){
+    alert('👀 View-Only Mode\n\nThis is a read-only copy. Turn off View-Only Mode in Settings to make changes.');
+    return true;
+  }
+  return false;
+}
+function setReadOnly(on){
+  localStorage.setItem('gw_readonly',on?'1':'0');
+  applyReadOnlyBanner();
+  rSettings();
+}
+function applyReadOnlyBanner(){
+  const b=$('readonly-banner');
+  if(b)b.style.display=isReadOnly()?'flex':'none';
+}
 function downloadOrganizedFile(fileObj,folderParts,filename){
   if(!fileObj||!autoSaveEnabled())return;
   try{
@@ -1099,10 +1135,12 @@ function initGoogleAuth(){
 }
 function driveConnected(){return localStorage.getItem('gw_drive_connected')==='1';}
 function connectGoogleDrive(){
+  if(guardReadOnly())return;
   if(!gTokenClient){alert('⏳ Still loading Google sign-in — try again in a second.');initGoogleAuth();return;}
   gTokenClient.requestAccessToken({prompt: gAccessToken?'':'consent'});
 }
 function disconnectGoogleDrive(){
+  if(guardReadOnly())return;
   if(!confirm('Disconnect Google Drive? Auto-upload will stop until you reconnect.'))return;
   gAccessToken=null;gTokenExpiry=0;
   localStorage.removeItem('gw_drive_connected');
@@ -1244,7 +1282,7 @@ function rCapital(){
   const totalContrib=getTotalContributions();
   const effectiveContribution=CAPITAL.contribution+totalContrib;
   const capRemain=effectiveContribution-totalDraws;
-  const bizBal=parseFloat(localStorage.getItem('gw_bizbal')||'58970');
+  const bizBal=parseFloat(localStorage.getItem('gw_bizbal')||'60000');
   if($('d-bizbal')){
     $('d-bizbal').textContent=fmt(bizBal);
     $('d-bizbal').style.color=bizBal>10000?'var(--grn)':bizBal>3000?'var(--org)':'var(--red)';
@@ -1288,6 +1326,7 @@ function rChart(){
   chartInst=new Chart(c.getContext('2d'),{type:'line',data:{labels:keys.map(k=>months[k].lbl),datasets:[{label:'Revenue',data:keys.map(k=>months[k].rev),borderColor:'#22c55e',backgroundColor:'rgba(34,197,94,.08)',borderWidth:2,tension:.4,pointRadius:3},{label:'Expenses',data:keys.map(k=>months[k].exp),borderColor:'#ef4444',backgroundColor:'rgba(239,68,68,.05)',borderWidth:2,tension:.4,pointRadius:3}]},options:{responsive:true,maintainAspectRatio:true,plugins:{legend:{labels:{color:'#7b85a3',font:{size:10},boxWidth:8}}},scales:{x:{ticks:{color:'#7b85a3',font:{size:9}},grid:{color:'rgba(42,49,80,.4)'}},y:{ticks:{color:'#7b85a3',font:{size:9},callback:v=>'$'+(v/1000).toFixed(0)+'K'},grid:{color:'rgba(42,49,80,.4)'}}}}}); 
 }
 function deleteSett(i){
+  if(guardReadOnly())return;
   const s=DB.sett[i];
   if(!s)return;
   if(!confirm('Delete settlement: Week '+s.weekEnding+' ('+fmt(s.gross)+')? This will also remove related loads, fuel, deductions.'))return;
@@ -1295,7 +1334,7 @@ function deleteSett(i){
   const settId=s.id;
   
   // Reverse business balance
-  const currentBal=parseFloat(localStorage.getItem('gw_bizbal')||'58970');
+  const currentBal=parseFloat(localStorage.getItem('gw_bizbal')||'60000');
   const newBal=currentBal-(s.net||0);
   localStorage.setItem('gw_bizbal',newBal.toString());
   
@@ -1334,6 +1373,7 @@ function deleteSett(i){
 
 function rLoads(){const tm=DB.loads.reduce((a,x)=>a+(x.loadedMiles||0),0),tr=DB.loads.reduce((a,x)=>a+(x.revenue||0),0);$('l-cnt').textContent=DB.loads.length;$('l-mi').textContent=tm.toLocaleString();$('l-rpm').textContent=tm?fmt(tr/tm):'$0.00';if(!DB.loads.length){$('l-tbl').innerHTML='<div class="empty">Import PDF</div>';return;}$('l-tbl').innerHTML='<table><thead><tr><th>Order</th><th>Date</th><th>Shipper</th><th>From→To</th><th>Miles</th><th>Revenue</th><th></th></tr></thead><tbody>'+DB.loads.map((x,i)=>`<tr><td class="ta">${x.order||'—'}</td><td>${fd(x.date)}</td><td>${x.shipper||'—'}</td><td class="tm">${x.from||'—'} → ${x.to||'—'}</td><td>${(x.loadedMiles||0).toLocaleString()}</td><td class="tg">${fmt(x.revenue)}</td><td><button onclick="deleteLoad(${i})" style="background:none;border:1px solid var(--red);color:var(--red);padding:2px 7px;border-radius:4px;font-size:10px;cursor:pointer">✕</button></td></tr>`).join('')+'</tbody></table>';}
 function deleteLoad(i){
+  if(guardReadOnly())return;
   if(!confirm('Delete this load?'))return;
   DB.loads.splice(i,1);
   saveDB();rLoads();rDash();
@@ -1343,6 +1383,7 @@ function rReimb(){const t=DB.reimb.reduce((a,x)=>a+(x.amount||0),0);$('r-tot').t
 function rFuel(){const tG=DB.fuel.tr.reduce((a,x)=>a+(x.amount||0),0),tD=DB.fuel.tr.reduce((a,x)=>a+(x.discount||0),0),rG=DB.fuel.re.reduce((a,x)=>a+(x.amount||0),0),rD=DB.fuel.re.reduce((a,x)=>a+(x.discount||0),0);$('f-tr').textContent=fmt(tG);$('f-re').textContent=fmt(rG);$('f-dis').textContent=fmt(tD+rD);$('f-net').textContent=fmt(tG+rG-tD-rD);const ft=(arr,id,type)=>{if(!arr.length){$(id).innerHTML='<div class="empty">Import PDF</div>';return;}$(id).innerHTML='<table><thead><tr><th>Date</th><th>Location</th><th>Gallons</th><th>Amount</th><th>Discount</th><th></th></tr></thead><tbody>'+arr.map((x,i)=>`<tr><td>${fd(x.date)}</td><td class="tm">${x.location||'—'}</td><td>${(x.gallons||0).toFixed(1)}</td><td class="tr">${fmt(x.amount)}</td><td class="tg">${x.discount?'-'+fmt(x.discount):'—'}</td><td><button onclick="deleteFuel('${type}',${i})" style="background:none;border:1px solid var(--red);color:var(--red);padding:2px 7px;border-radius:4px;font-size:10px;cursor:pointer">✕</button></td></tr>`).join('')+'</tbody></table>';};ft(DB.fuel.tr,'f-trtbl','tr');ft(DB.fuel.re,'f-retbl','re');}
 
 function deleteFuel(type,i){
+  if(guardReadOnly())return;
   if(!confirm('Delete this fuel record?'))return;
   DB.fuel[type].splice(i,1);
   saveDB();rFuel();rDash();
@@ -1412,6 +1453,7 @@ const PRIME_HISTORY_830157=[
 ];
 
 function loadPrimeHistory(){
+  if(guardReadOnly())return;
   const already=DB.maint.some(m=>m.source==='prime830157');
   if(already&&!confirm('⚠️ This Prime service history looks like it\'s already been imported.\n\nImport again anyway? This may create duplicate records.'))return;
   if(!already&&!confirm('Import '+PRIME_HISTORY_830157.length+' historical service records for Unit 830157 (from the Prime repair order report)?\n\nThis will also update your Truck Health intervals (oil, DPF, brakes, etc).'))return;
@@ -1476,6 +1518,7 @@ function rMaint(){
 }
 
 function deleteMaint(i){
+  if(guardReadOnly())return;
   if(!confirm('Delete this maintenance record?'))return;
   DB.maint.splice(i,1);
   saveDB();rMaint();
@@ -1495,6 +1538,7 @@ function rebuildMaintDerivedHealth(){
 }
 
 function saveMaint(){
+  if(guardReadOnly())return;
   const odo=parseFloat($('mn-odo').value)||0;
   const hours=parseFloat($('mn-hrs').value)||0;
   const type=$('mn-type').value||'general';
@@ -1617,6 +1661,7 @@ function editDedItem(i){
   upd();
 }
 function saveDedItem(i,btn){
+  if(guardReadOnly())return;
   const x=DB.ded[i];
   if(!x)return;
   x.category=document.getElementById('dp-cat').value;
@@ -1627,6 +1672,7 @@ function saveDedItem(i,btn){
   rDed();rDash();
 }
 function deleteDed(i){
+  if(guardReadOnly())return;
   if(!confirm('Delete this deduction record?'))return;
   const x=DB.ded[i];
   if(x&&x.id)removeContribution(x.id);
@@ -1635,6 +1681,7 @@ function deleteDed(i){
   try{cleanupStaleDocs(true);}catch(e){}
 }
 function saveManualDed(){
+  if(guardReadOnly())return;
   const desc=$('md-desc').value;
   if(!desc)return alert('Enter a description');
   const cat=$('md-cat').value;
@@ -1709,6 +1756,7 @@ function rHealth(h){
 }
 
 function calcHealth(){
+  if(guardReadOnly())return;
   const h={
     odo:parseFloat($('h-odo').value)||0,
     mpg:parseFloat($('h-mpg').value)||8.9,
@@ -1736,12 +1784,16 @@ function calcCF(){const b=parseFloat($('cf-b').value)||0,wr=parseFloat($('cf-wr'
 function rScore(){const rev=DB.sett.reduce((a,x)=>a+(x.gross||0),0),ded=DB.ded.reduce((a,x)=>a+(x.amount||0),0),mi=DB.sett.reduce((a,x)=>a+(x.miles||0),0),fuel=DB.fuel.tr.reduce((a,x)=>a+(x.amount||0)-(x.discount||0),0)+DB.fuel.re.reduce((a,x)=>a+(x.amount||0)-(x.discount||0),0);if(!rev||!mi){$('sc-score').textContent='—';$('sc-grade').textContent='Import PDF to calculate';$('sc-kpis').innerHTML='<div class="empty">Import PDF</div>';return;}const rpm=rev/mi,fpm=fuel/mi,npm=(rev-ded)/mi;let s=0;if(rpm>=2.5)s+=25;else if(rpm>=2.0)s+=20;else if(rpm>=1.7)s+=12;else s+=5;if(fpm<=0.5)s+=25;else if(fpm<=0.65)s+=18;else if(fpm<=0.8)s+=10;else s+=3;if(npm>=0.8)s+=25;else if(npm>=0.6)s+=18;else if(npm>=0.4)s+=10;else s+=3;if(mi>0)s+=15;s=Math.min(100,Math.round(s));const g=s>=90?'Excellent 🏆':s>=75?'Good 👍':s>=60?'Average ⚠️':'Needs Work 🔧';$('sc-score').textContent=s;$('sc-score').style.color=s>=75?'var(--grn)':s>=60?'var(--org)':'var(--red)';$('sc-grade').textContent=g;$('sc-kpis').innerHTML=`<div class="osr"><span>Revenue/Mile</span><span style="color:${rpm>=2.0?'var(--grn)':'var(--org)'}; font-weight:600">${fmt(rpm)}</span></div><div class="osr"><span>Fuel/Mile</span><span style="color:${fpm<=0.65?'var(--grn)':'var(--red)'};font-weight:600">${fmt(fpm)}</span></div><div class="osr"><span>Net/Mile</span><span style="color:${npm>=0.6?'var(--grn)':'var(--org)'};font-weight:600">${fmt(npm)}</span></div><div class="osr tot"><span>Score</span><span style="color:${s>=75?'var(--grn)':s>=60?'var(--org)':'var(--red)'};font-size:15px">${s}/100</span></div>`;}
 function rLoanc(){const t=LOANS.reduce((a,x)=>a+(x.balance||0),0),w=LOANS.filter(x=>x.freq==='Weekly').reduce((a,x)=>a+(x.payment||0),0),m=LOANS.filter(x=>x.freq==='Monthly').reduce((a,x)=>a+(x.payment||0),0)+w*4.33;$('lc-tot').textContent=fmt(t);$('lc-wk').textContent=fmt(w);$('lc-mo').textContent=fmt(m);if(!LOANS.length){$('lc-tbl').innerHTML='<div class="empty">No loans yet</div>';return;}$('lc-tbl').innerHTML='<table><thead><tr><th>Name</th><th>Balance</th><th>Payment</th><th>Freq</th><th>APR</th><th>Next Due</th><th></th></tr></thead><tbody>'+LOANS.map((x,i)=>`<tr><td style="font-weight:600">${x.name}</td><td class="tr">${fmt(x.balance)}</td><td>${fmt(x.payment)}</td><td class="tm">${x.freq}</td><td class="tm">${x.apr||0}%</td><td style="color:var(--org)">${x.due||'—'}</td><td><button onclick="delLoan(${i})" style="background:none;border:1px solid var(--red);color:var(--red);padding:1px 6px;border-radius:4px;font-size:10px;cursor:pointer">✕</button></td></tr>`).join('')+'</tbody></table>';}
 function addLoan(){$('ln-n').focus();}
-function saveLoan(){const l={name:$('ln-n').value,lender:$('ln-l').value,original:+($('ln-o').value||0),balance:+($('ln-b').value||0),payment:+($('ln-p').value||0),freq:$('ln-f').value,apr:+($('ln-r').value||0),due:$('ln-d').value};if(!l.name)return alert('Enter name');LOANS.push(l);localStorage.setItem('gw_loans',JSON.stringify(LOANS));['ln-n','ln-l','ln-o','ln-b','ln-p','ln-r'].forEach(id=>$(id).value='');rLoanc();}
-function delLoan(i){LOANS.splice(i,1);localStorage.setItem('gw_loans',JSON.stringify(LOANS));rLoanc();}
+function saveLoan(){
+  if(guardReadOnly())return;const l={name:$('ln-n').value,lender:$('ln-l').value,original:+($('ln-o').value||0),balance:+($('ln-b').value||0),payment:+($('ln-p').value||0),freq:$('ln-f').value,apr:+($('ln-r').value||0),due:$('ln-d').value};if(!l.name)return alert('Enter name');LOANS.push(l);localStorage.setItem('gw_loans',JSON.stringify(LOANS));['ln-n','ln-l','ln-o','ln-b','ln-p','ln-r'].forEach(id=>$(id).value='');rLoanc();}
+function delLoan(i){
+  if(guardReadOnly())return;LOANS.splice(i,1);localStorage.setItem('gw_loans',JSON.stringify(LOANS));rLoanc();}
 function rCards(){const t=CARDS.reduce((a,x)=>a+(x.balance||0),0),lim=CARDS.reduce((a,x)=>a+(x.limit||0),0),mn=CARDS.reduce((a,x)=>a+(x.minpay||0),0);$('cc-tot').textContent=fmt(t);$('cc-lim').textContent=fmt(lim);$('cc-util').textContent=lim?((t/lim)*100).toFixed(1)+'%':'—';$('cc-util').style.color=(lim&&t/lim>0.3)?'var(--org)':'var(--grn)';$('cc-min').textContent=fmt(mn);if(!CARDS.length){$('cc-tbl').innerHTML='<div class="empty">No cards yet</div>';return;}$('cc-tbl').innerHTML='<table><thead><tr><th>Card</th><th>Balance</th><th>Limit</th><th>Util%</th><th>APR</th><th>Min Pay</th><th>Due</th><th></th></tr></thead><tbody>'+CARDS.map((x,i)=>{const u=x.limit?((x.balance/x.limit)*100).toFixed(0):0;return`<tr><td style="font-weight:600">${x.name}</td><td class="tr">${fmt(x.balance)}</td><td class="tm">${fmt(x.limit)}</td><td style="color:${u>30?'var(--org)':'var(--grn)'}">${u}%</td><td class="tm">${x.apr||0}%</td><td>${fmt(x.minpay)}</td><td class="tm">${x.dueday||'—'}</td><td><button onclick="delCard(${i})" style="background:none;border:1px solid var(--red);color:var(--red);padding:1px 6px;border-radius:4px;font-size:10px;cursor:pointer">✕</button></td></tr>`;}).join('')+'</tbody></table>';}
 function addCard(){$('cc-n').focus();}
-function saveCard(){const c={name:$('cc-n').value,balance:+($('cc-b').value||0),limit:+($('cc-lm').value||0),apr:+($('cc-a').value||0),minpay:+($('cc-m').value||0),dueday:$('cc-d').value};if(!c.name)return alert('Enter name');CARDS.push(c);localStorage.setItem('gw_cards',JSON.stringify(CARDS));['cc-n','cc-b','cc-lm','cc-a','cc-m','cc-d'].forEach(id=>$(id).value='');rCards();}
-function delCard(i){CARDS.splice(i,1);localStorage.setItem('gw_cards',JSON.stringify(CARDS));rCards();}
+function saveCard(){
+  if(guardReadOnly())return;const c={name:$('cc-n').value,balance:+($('cc-b').value||0),limit:+($('cc-lm').value||0),apr:+($('cc-a').value||0),minpay:+($('cc-m').value||0),dueday:$('cc-d').value};if(!c.name)return alert('Enter name');CARDS.push(c);localStorage.setItem('gw_cards',JSON.stringify(CARDS));['cc-n','cc-b','cc-lm','cc-a','cc-m','cc-d'].forEach(id=>$(id).value='');rCards();}
+function delCard(i){
+  if(guardReadOnly())return;CARDS.splice(i,1);localStorage.setItem('gw_cards',JSON.stringify(CARDS));rCards();}
 
 function arFilter(cat){
   arActiveFilter=cat;
@@ -1807,6 +1859,7 @@ function rAreg(){
 }
 function addAsset(){$('as-n').focus();}
 function saveAsset(){
+  if(guardReadOnly())return;
   const name=$('as-n').value;
   const store=$('as-store').value;
   const payment=$('as-payment')?$('as-payment').value:'Business Credit';
@@ -1827,8 +1880,10 @@ function saveAsset(){
   rAreg();rDash();
   alert('✅ Item saved!'+(isPersonalPayment(payment)?'\n💰 Added as a Capital Account contribution of '+fmt(cost)+' (paid from personal funds, not the business account).':''));
 }
-function delAsset(i){ASSETS2.splice(i,1);localStorage.setItem('gw_assets',JSON.stringify(ASSETS2));rAreg();}
+function delAsset(i){
+  if(guardReadOnly())return;ASSETS2.splice(i,1);localStorage.setItem('gw_assets',JSON.stringify(ASSETS2));rAreg();}
 function deleteEquipItem(i){
+  if(guardReadOnly())return;
   if(!confirm('Delete this item?'))return;
   const x=DB.ded[i];
   if(x&&x.id)removeContribution(x.id);
@@ -1873,6 +1928,7 @@ function editEquipItem(i){
 }
 
 function saveEquipEdit(i,btn){
+  if(guardReadOnly())return;
   const x=DB.ded[i];
   if(!x)return;
   const name=document.getElementById('ei-name').value;
@@ -1935,12 +1991,15 @@ function genPkg(){const rev=DB.sett.reduce((a,x)=>a+(x.gross||0),0),ded=DB.ded.r
 
 // ═══ SETTINGS ═══
 function getKey(){return localStorage.getItem('gw_apikey')||'';}
-function saveKey(){const k=$('apikey').value.trim();if(!k||!k.startsWith('sk-ant-')){showMsg('❌ Invalid key','#ef4444');return;}localStorage.setItem('gw_apikey',k);$('apikey').value='';$('apikey').type='password';showMsg('✅ Key saved!','#22c55e');rSettings();}
+function saveKey(){
+  if(guardReadOnly())return;const k=$('apikey').value.trim();if(!k||!k.startsWith('sk-ant-')){showMsg('❌ Invalid key','#ef4444');return;}localStorage.setItem('gw_apikey',k);$('apikey').value='';$('apikey').type='password';showMsg('✅ Key saved!','#22c55e');rSettings();}
 function showKey(){const k=getKey();if(k){$('apikey').value=k;$('apikey').type='text';}else showMsg('No key saved','#7b85a3');}
-function delKey(){if(!confirm('Delete API key?'))return;localStorage.removeItem('gw_apikey');$('apikey').value='';showMsg('🗑 Deleted','#f59e0b');rSettings();}
+function delKey(){
+  if(guardReadOnly())return;if(!confirm('Delete API key?'))return;localStorage.removeItem('gw_apikey');$('apikey').value='';showMsg('🗑 Deleted','#f59e0b');rSettings();}
 function showMsg(msg,col){const el=$('key-msg');el.style.display='block';el.style.color=col;el.textContent=msg;setTimeout(()=>el.style.display='none',4000);}
 function getBiz(){return JSON.parse(localStorage.getItem('gw_biz')||'{"company":"Graywolf Logistics LLC","owner":"Ali Bozkurt","email":"graywolflogistics2026@gmail.com","phone":"","dot":"","mc":"","ein":"","addr":"145 Hal Norton Way, Jarrell TX 76537"}');}
 function saveBizInfo(){
+  if(guardReadOnly())return;
   const biz={company:$('s-company').value||'Graywolf Logistics LLC',owner:$('s-owner').value||'Ali Bozkurt',email:$('s-email').value||'graywolflogistics2026@gmail.com',phone:$('s-phone').value,dot:$('s-dot').value,mc:$('s-mc').value,ein:$('s-ein').value,addr:$('s-addr').value};
   localStorage.setItem('gw_biz',JSON.stringify(biz));
   const m=$('biz-msg');m.style.display='block';m.style.color='#22c55e';m.textContent='✅ Business info saved!';setTimeout(()=>m.style.display='none',3000);
@@ -1964,6 +2023,11 @@ function rSettings(){
       ?'<span style="color:var(--grn);font-weight:600">✅ Connected — uploading to graywolflogistics2026 documents/ in your Drive</span>'
       :'<span style="color:var(--mut)">⚪ Not connected</span>';
   }
+  if($('readonly-status')){
+    $('readonly-status').innerHTML=isReadOnly()
+      ?'<span style="color:var(--org);font-weight:600">👀 View-Only Mode is ON — editing disabled on this device</span>'
+      :'<span style="color:var(--grn);font-weight:600">✏️ Editing is allowed on this device</span>';
+  }
 }
 function exportData(){
   const payload={
@@ -1971,7 +2035,7 @@ function exportData(){
     capitalDraws:CAPITAL.draws,
     capitalContributions:CAPITAL.extraContributions,
     health:JSON.parse(localStorage.getItem('gw_health')||'{}'),
-    bizBalance:localStorage.getItem('gw_bizbal')||'58970',
+    bizBalance:localStorage.getItem('gw_bizbal')||'60000',
     bankStatements:BANK_STMTS,
     checkingStatements:CHK_STMTS,
     autoSave:localStorage.getItem('gw_autosave')||'1',
@@ -1983,6 +2047,7 @@ function exportData(){
   a.click();URL.revokeObjectURL(url);
 }
 function importData(file){
+  if(guardReadOnly())return;
   if(!file)return;
   const r=new FileReader();
   r.onload=e=>{
@@ -2008,7 +2073,8 @@ function importData(file){
   };
   r.readAsText(file);
 }
-function clearAll(){if(!confirm('Delete ALL data? Cannot be undone.'))return;if(!confirm('FINAL WARNING. Continue?'))return;['gw_db','gw_loans','gw_cards','gw_assets','gw_health','gw_apikey','gw_draws','gw_contributions','gw_bizbal','gw_bankstmts','gw_chkstmts','gw_autosave','gw_drive_connected','gw_drive_folders'].forEach(k=>localStorage.removeItem(k));location.reload();}
+function clearAll(){
+  if(guardReadOnly())return;if(!confirm('Delete ALL data? Cannot be undone.'))return;if(!confirm('FINAL WARNING. Continue?'))return;['gw_db','gw_loans','gw_cards','gw_assets','gw_health','gw_apikey','gw_draws','gw_contributions','gw_bizbal','gw_bankstmts','gw_chkstmts','gw_autosave','gw_drive_connected','gw_drive_folders'].forEach(k=>localStorage.removeItem(k));location.reload();}
 
 // ═══ AI ADVISOR ═══
 const aiHist=[];
@@ -2066,9 +2132,11 @@ function calcTax(){const rev=+($('ti-rev').value||0),exp=+($('ti-exp').value||0)
 // ═══ PDF IMPORT ═══
 const STEPS=['Reading document...','Identifying type...','Extracting data...','Routing to modules...','AI processing...'];
 const DTYPES={settlement:{ico:'💰',lbl:'Prime Settlement',route:'Settlements · Loads · Fuel · Deductions · Assets'},fuel:{ico:'⛽',lbl:'Fuel Receipt',route:'Fuel Log'},maintenance:{ico:'🔧',lbl:'Repair Invoice',route:'Maintenance'},amazon:{ico:'📦',lbl:'Store/Amazon Purchase',route:'Asset Register (auto-categorized) · Vault'},store:{ico:'🛒',lbl:'Store Receipt',route:'Asset Register · Vault'},toll:{ico:'🛣️',lbl:'Toll Bill',route:'Tolls'},loan:{ico:'🏦',lbl:'Loan Statement',route:'Loan Center'},other:{ico:'📄',lbl:'Document',route:'Asset Register / Deductions'}};
-function openPDF(){if(!getKey()){alert('⚠️ No API key!\n\nGo to Settings → add your Anthropic API key first.');go('settings',document.querySelector('.ni:last-of-type'));return;}$('pdfOv').classList.add('open');$('dz').style.display='block';$('progbox').style.display='none';$('rprev').style.display='none';}
+function openPDF(){
+  if(guardReadOnly())return;if(!getKey()){alert('⚠️ No API key!\n\nGo to Settings → add your Anthropic API key first.');go('settings',document.querySelector('.ni:last-of-type'));return;}$('pdfOv').classList.add('open');$('dz').style.display='block';$('progbox').style.display='none';$('rprev').style.display='none';}
 function closePDF(){$('pdfOv').classList.remove('open');PENDING=null;}
 async function importBankStatement(file){
+  if(guardReadOnly())return;
   // BofA Business Credit Card statement — view only, no deductions added
   if(!file)return;
   $('dz').style.display='none';$('progbox').style.display='block';$('rprev').style.display='none';
@@ -2198,6 +2266,7 @@ function getCatNote(cat){
 }
 
 async function saveImport(){
+  if(guardReadOnly())return;
   if(!PENDING)return;
   const d=PENDING,dt=d.docType||'other';
   const _dupe=checkDuplicateImport(d);
@@ -2217,7 +2286,7 @@ async function saveImport(){
     if(s.assets?.tractor)DB.assets.tr=s.assets.tractor;
     if(s.assets?.apu)DB.assets.apu=s.assets.apu;
     if(s.operating)DB.op={...DB.op,...s.operating};
-    const currentBal=parseFloat(localStorage.getItem('gw_bizbal')||'58970');
+    const currentBal=parseFloat(localStorage.getItem('gw_bizbal')||'60000');
     const netPay=s.netPay||0;
     if(netPay>0)localStorage.setItem('gw_bizbal',(currentBal+netPay).toString());
   }else if(dt==='fuel'&&d.fuel){
@@ -2296,6 +2365,7 @@ function bsTab(tab){
 }
 
 function openBankPDF(){
+  if(guardReadOnly())return;
   if(!getKey()){alert('⚠️ No API key!\n\nGo to Settings first.');return;}
   $('pdfOv').classList.add('open');
   $('dz').style.display='block';
@@ -2308,6 +2378,7 @@ function openBankPDF(){
 // Was referenced by handleFile() but never defined — checking statement import was silently
 // broken before this. Modeled after importBankStatement().
 async function importCheckingStatement(file){
+  if(guardReadOnly())return;
   if(!file)return;
   $('dz').style.display='none';$('progbox').style.display='block';$('rprev').style.display='none';
   const st=$('steps');st.innerHTML='';
@@ -2347,6 +2418,7 @@ Return ONLY JSON.`;
 }
 
 function openCheckingPDF(){
+  if(guardReadOnly())return;
   if(!getKey()){alert('⚠️ No API key!\n\nGo to Settings first.');return;}
   $('pdfOv').classList.add('open');
   $('dz').style.display='block';
@@ -2404,6 +2476,7 @@ function rBankStmt(){
     <div style="margin-top:8px;padding:8px;background:rgba(34,197,94,.08);border:1px solid var(--grn);border-radius:7px;font-size:11px;color:var(--mut)">ℹ️ Fuel paid via Comdata/EFS — in Settlements, not here</div>`;
 }
 function deleteBankStmt(i){
+  if(guardReadOnly())return;
   if(!confirm('Remove this statement? Its transactions will drop out of the totals above.'))return;
   BANK_STMTS.splice(i,1);
   localStorage.setItem('gw_bankstmts',JSON.stringify(BANK_STMTS));
@@ -2455,6 +2528,7 @@ function rCheckingStmt(){
     </tr>`).join('')+'</tbody></table>';
 }
 function deleteChkStmt(i){
+  if(guardReadOnly())return;
   if(!confirm('Remove this statement? Its transactions will drop out of the totals above.'))return;
   CHK_STMTS.splice(i,1);
   localStorage.setItem('gw_chkstmts',JSON.stringify(CHK_STMTS));
@@ -2462,6 +2536,7 @@ function deleteChkStmt(i){
 }
 
 function reconcileBalance(amount){
+  if(guardReadOnly())return;
   localStorage.setItem('gw_bizbal',amount.toString());
   if($('d-bizbal'))$('d-bizbal').textContent=fmt(amount);
   alert('✅ Balance updated to '+fmt(amount));
@@ -2477,6 +2552,7 @@ window.addEventListener('load',()=>{
   try{cleanupOrphanedContributions(true);}catch(e){console.error('contrib-cleanup:',e);}
   try{cleanupStaleDocs(true);}catch(e){console.error('docs-cleanup:',e);}
   try{initGoogleAuth();}catch(e){console.error('google-auth-init:',e);}
+  try{applyReadOnlyBanner();}catch(e){console.error('readonly-banner:',e);}
   const h=JSON.parse(localStorage.getItem('gw_health')||'{}');
   if(h.odo)try{rHealth(h);}catch(e){}
 });
