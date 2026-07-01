@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <title>Bozkurt Fleet OS</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;}
 :root{--bg:#0f1117;--side:#161b27;--card:#1c2233;--card2:#212840;--bor:#2a3150;--txt:#e8eaf6;--mut:#7b85a3;--acc:#4f7cff;--grn:#22c55e;--red:#ef4444;--org:#f59e0b;--pur:#a855f7;}
@@ -806,8 +807,17 @@ canvas{max-height:160px;}
         <input type="file" id="impfile" accept=".json" style="display:none" onchange="importData(this.files[0])">
       </div>
       <div class="card">
-        <div class="ct">📁 Auto-Organize Imported PDFs</div>
-        <p style="color:var(--mut);font-size:12px;margin-bottom:10px">Every time a PDF is imported and saved (settlement, fuel, maintenance, bank statement...), the original file is also auto-downloaded into a dated, category folder — e.g. <code>Settlements/2026-06-28_settlement_prime-inc.pdf</code>. If your browser's download destination is set to your Google Drive sync folder, these land there and sync automatically.</p>
+        <div class="ct">☁️ Google Drive — Real Auto-Upload</div>
+        <p style="color:var(--mut);font-size:12px;margin-bottom:10px">When connected, every saved PDF automatically uploads in the background to <b>Bozkurt Fleet OS/&lt;category&gt;/</b> in your Google Drive — no download dialogs, no manual steps.</p>
+        <div id="drive-status" style="margin-bottom:10px"></div>
+        <div style="display:flex;gap:8px">
+          <button class="btn" onclick="connectGoogleDrive()">🔗 Connect Google Drive</button>
+          <button onclick="disconnectGoogleDrive()" style="background:rgba(239,68,68,.1);border:1px solid var(--red);color:var(--red);padding:7px 12px;border-radius:7px;font-size:12px;cursor:pointer">Disconnect</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="ct">📁 Auto-Organize Imported PDFs (local fallback)</div>
+        <p style="color:var(--mut);font-size:12px;margin-bottom:10px">If Google Drive isn't connected above, PDFs auto-download instead with an organized name — e.g. <code>Settlements/2026-06-28_settlement_prime-inc.pdf</code>. Point your browser's download destination at your Google Drive sync folder to get the same result without connecting.</p>
         <label style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer;margin-bottom:10px">
           <input type="checkbox" id="autosave-toggle" onchange="localStorage.setItem('gw_autosave',this.checked?'1':'0')" style="width:16px;height:16px">
           Auto-save PDFs to organized folders after import
@@ -911,6 +921,101 @@ function downloadOrganizedFile(fileObj,folder,filename){
     document.body.appendChild(a);a.click();document.body.removeChild(a);
     setTimeout(()=>URL.revokeObjectURL(url),1500);
   }catch(e){console.error('Auto-save download failed:',e);}
+}
+
+// ═══ GOOGLE DRIVE INTEGRATION (real, silent, background upload) ═══
+const GOOGLE_CLIENT_ID='231269100421-qgqhc65objads25sgsgfgl1ii3dlekdt.apps.googleusercontent.com';
+const DRIVE_SCOPE='https://www.googleapis.com/auth/drive.file';
+let gTokenClient=null,gAccessToken=null,gTokenExpiry=0;
+let DRIVE_FOLDERS=JSON.parse(localStorage.getItem('gw_drive_folders')||'{}');
+
+function initGoogleAuth(){
+  if(typeof google==='undefined'||!google.accounts){setTimeout(initGoogleAuth,400);return;}
+  gTokenClient=google.accounts.oauth2.initTokenClient({
+    client_id:GOOGLE_CLIENT_ID,
+    scope:DRIVE_SCOPE,
+    callback:(resp)=>{
+      if(resp.error){console.error('Google auth error:',resp);alert('❌ Google Drive connection failed: '+resp.error);return;}
+      gAccessToken=resp.access_token;
+      gTokenExpiry=Date.now()+((resp.expires_in||3600)*1000)-60000;
+      localStorage.setItem('gw_drive_connected','1');
+      if($('drive-status'))rSettings();
+      alert('✅ Google Drive connected! Future imports will auto-upload.');
+    }
+  });
+}
+function driveConnected(){return localStorage.getItem('gw_drive_connected')==='1';}
+function connectGoogleDrive(){
+  if(!gTokenClient){alert('⏳ Still loading Google sign-in — try again in a second.');initGoogleAuth();return;}
+  gTokenClient.requestAccessToken({prompt: gAccessToken?'':'consent'});
+}
+function disconnectGoogleDrive(){
+  if(!confirm('Disconnect Google Drive? Auto-upload will stop until you reconnect.'))return;
+  gAccessToken=null;gTokenExpiry=0;
+  localStorage.removeItem('gw_drive_connected');
+  localStorage.removeItem('gw_drive_folders');
+  DRIVE_FOLDERS={};
+  rSettings();
+}
+// Ensures we have a live access token, silently refreshing if possible (no popup if already consented).
+async function ensureDriveToken(){
+  if(gAccessToken&&Date.now()<gTokenExpiry)return true;
+  if(!driveConnected())return false;
+  if(!gTokenClient){initGoogleAuth();await new Promise(r=>setTimeout(r,600));}
+  return new Promise(resolve=>{
+    if(!gTokenClient){resolve(false);return;}
+    const prevCb=gTokenClient.callback;
+    gTokenClient.callback=(resp)=>{
+      gTokenClient.callback=prevCb;
+      if(resp.error){resolve(false);return;}
+      gAccessToken=resp.access_token;
+      gTokenExpiry=Date.now()+((resp.expires_in||3600)*1000)-60000;
+      resolve(true);
+    };
+    try{gTokenClient.requestAccessToken({prompt:''});}catch(e){resolve(false);}
+  });
+}
+async function driveFindOrCreateFolder(name,parentId){
+  const cacheKey=parentId?parentId+'/'+name:name;
+  if(DRIVE_FOLDERS[cacheKey])return DRIVE_FOLDERS[cacheKey];
+  let q=`name='${name.replace(/'/g,"\\'")}' and mimeType='application/vnd.google-apps.folder' and trashed=false`;
+  if(parentId)q+=` and '${parentId}' in parents`;
+  const searchRes=await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name)`,{headers:{Authorization:'Bearer '+gAccessToken}});
+  const searchData=await searchRes.json();
+  if(searchData.files&&searchData.files.length>0){
+    DRIVE_FOLDERS[cacheKey]=searchData.files[0].id;
+    localStorage.setItem('gw_drive_folders',JSON.stringify(DRIVE_FOLDERS));
+    return DRIVE_FOLDERS[cacheKey];
+  }
+  const metadata={name,mimeType:'application/vnd.google-apps.folder'};
+  if(parentId)metadata.parents=[parentId];
+  const createRes=await fetch('https://www.googleapis.com/drive/v3/files',{method:'POST',headers:{Authorization:'Bearer '+gAccessToken,'Content-Type':'application/json'},body:JSON.stringify(metadata)});
+  const created=await createRes.json();
+  DRIVE_FOLDERS[cacheKey]=created.id;
+  localStorage.setItem('gw_drive_folders',JSON.stringify(DRIVE_FOLDERS));
+  return created.id;
+}
+async function driveUploadFile(fileObj,filename,folderId){
+  const metadata={name:filename,parents:folderId?[folderId]:undefined};
+  const form=new FormData();
+  form.append('metadata',new Blob([JSON.stringify(metadata)],{type:'application/json'}));
+  form.append('file',fileObj);
+  const res=await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink',{method:'POST',headers:{Authorization:'Bearer '+gAccessToken},body:form});
+  if(!res.ok)throw new Error('Drive upload HTTP '+res.status);
+  return res.json();
+}
+// Main entry point: uploads a file into Bozkurt Fleet OS/<category>/ in the user's Drive.
+// Silent — logs to console on failure so it never blocks the normal save flow.
+async function uploadToOrganizedDrive(fileObj,folder,filename){
+  if(!fileObj||!driveConnected())return false;
+  try{
+    const ok=await ensureDriveToken();
+    if(!ok){console.warn('Drive token unavailable — skipping upload, local download still happened.');return false;}
+    const rootId=await driveFindOrCreateFolder('Bozkurt Fleet OS',null);
+    const folderId=await driveFindOrCreateFolder(folder,rootId);
+    await driveUploadFile(fileObj,filename,folderId);
+    return true;
+  }catch(e){console.error('Drive upload failed:',e);return false;}
 }
 
 const $=id=>document.getElementById(id);
@@ -1592,6 +1697,11 @@ function rSettings(){
   Object.entries(fields).forEach(([id,key])=>{const el=$(id);if(el&&biz[key])el.value=biz[key];});
   if($('st-email'))$('st-email').textContent=biz.email||'—';
   if($('autosave-toggle'))$('autosave-toggle').checked=autoSaveEnabled();
+  if($('drive-status')){
+    $('drive-status').innerHTML=driveConnected()
+      ?'<span style="color:var(--grn);font-weight:600">✅ Connected — uploading to Bozkurt Fleet OS/ in your Drive</span>'
+      :'<span style="color:var(--mut)">⚪ Not connected</span>';
+  }
 }
 function exportData(){const blob=new Blob([JSON.stringify({DB,loans:LOANS,cards:CARDS,assets:ASSETS2},null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='graywolf-backup-'+new Date().toISOString().split('T')[0]+'.json';a.click();URL.revokeObjectURL(url);}
 function importData(file){if(!file)return;const r=new FileReader();r.onload=e=>{try{const d=JSON.parse(e.target.result);if(d.DB)Object.assign(DB,d.DB);if(d.loans){LOANS.length=0;d.loans.forEach(x=>LOANS.push(x));localStorage.setItem('gw_loans',JSON.stringify(LOANS));}if(d.vault){VAULT.length=0;d.vault.forEach(x=>VAULT.push(x));localStorage.setItem(JSON.stringify(VAULT));}saveDB();rDash();alert('✅ Restored!');}catch(err){alert('❌ Error: '+err.message);}};r.readAsText(file);}
@@ -1680,10 +1790,12 @@ Return ONLY JSON.`;
     const BANK_STMTS=JSON.parse(localStorage.getItem('gw_bankstmts')||'[]');
     BANK_STMTS.push(parsed);
     localStorage.setItem('gw_bankstmts',JSON.stringify(BANK_STMTS));
-    downloadOrganizedFile(file,orgFolderName('bankstmt'),(parsed.month||'undated').replace(/\s+/g,'-')+'_BofA-Card-Statement.pdf');
+    const _bsFname=(parsed.month||'undated').replace(/\s+/g,'-')+'_BofA-Card-Statement.pdf';
+    downloadOrganizedFile(file,orgFolderName('bankstmt'),_bsFname);
+    const _bsDrive=driveConnected()?await uploadToOrganizedDrive(file,orgFolderName('bankstmt'),_bsFname):false;
     closePDF();window._bankStmtMode=false;
     bsTab('card');rBankStmt();
-    alert('✅ Statement imported!\nView only — no deductions added.\n'+(parsed.transactions||[]).length+' transactions categorized.');
+    alert('✅ Statement imported!\nView only — no deductions added.\n'+(parsed.transactions||[]).length+' transactions categorized.'+(_bsDrive?'\n☁️ Uploaded to Google Drive':''));
   }catch(err){
     st.innerHTML+=`<div class="pstep"><div class="dot" style="background:var(--red)">!</div><span style="color:var(--red)">Error: ${err.message}</span></div>`;
   }
@@ -1752,7 +1864,7 @@ function getCatNote(cat){
   return notes[cat]||'Business expense — OTR truck driver';
 }
 
-function saveImport(){
+async function saveImport(){
   if(!PENDING)return;
   const d=PENDING,dt=d.docType||'other';
   if(dt==='settlement'&&d.settlement){
@@ -1802,17 +1914,19 @@ function saveImport(){
   }
   DB.docs.push({filename:d._fn,date:d.date,docType:dt,amount:d.totalAmount||0,savedAt:new Date().toISOString()});
   saveDB();if(dt==='settlement'){try{syncTax();}catch(e){}}
-  let _saved=false;
+  let _saved=false,_drive=false;
   if(d._rawFile){
     const ext=(d._rawFile.name.split('.').pop()||'pdf');
     const ident=slugify(d.vendor||d.summary||dt);
     const fname=(d.date||'undated')+'_'+dt+'_'+ident+'.'+ext;
     downloadOrganizedFile(d._rawFile,orgFolderName(dt),fname);
     _saved=autoSaveEnabled();
+    if(driveConnected())_drive=await uploadToOrganizedDrive(d._rawFile,orgFolderName(dt),fname);
   }
   closePDF();go('dash',document.querySelector('.ni.on'));
   const _nm=dt==='settlement'&&d.settlement?'\n💰 Balance +'+fmt(d.settlement.netPay||0):'';
-  alert('✅ Saved to system!'+_nm+(_saved?'\n📁 PDF saved to '+orgFolderName(dt)+'/ folder':''));
+  const _fileMsg=_drive?'\n☁️ Uploaded to Google Drive → '+orgFolderName(dt)+'/':(_saved?'\n📁 PDF saved to '+orgFolderName(dt)+'/ folder':'');
+  alert('✅ Saved to system!'+_nm+_fileMsg);
 }
 function toB64(file){return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result.split(',')[1]);r.onerror=()=>rej(new Error('Read failed'));r.readAsDataURL(file);});}
 
@@ -1870,10 +1984,12 @@ Return ONLY JSON.`;
     parsed._fn=file.name;
     CHK_STMTS.push(parsed);
     localStorage.setItem('gw_chkstmts',JSON.stringify(CHK_STMTS));
-    downloadOrganizedFile(file,orgFolderName('checking'),(parsed.month||'undated').replace(/\s+/g,'-')+'_Checking-Statement.pdf');
+    const _ckFname=(parsed.month||'undated').replace(/\s+/g,'-')+'_Checking-Statement.pdf';
+    downloadOrganizedFile(file,orgFolderName('checking'),_ckFname);
+    const _ckDrive=driveConnected()?await uploadToOrganizedDrive(file,orgFolderName('checking'),_ckFname):false;
     closePDF();window._checkingMode=false;
     bsTab('checking');rCheckingStmt();
-    alert('✅ Checking statement imported!\n'+(parsed.transactions||[]).length+' transactions.'+(autoSaveEnabled()?'\n📁 PDF saved to Bank Statements/ folder':''));
+    alert('✅ Checking statement imported!\n'+(parsed.transactions||[]).length+' transactions.'+(_ckDrive?'\n☁️ Uploaded to Google Drive':(autoSaveEnabled()?'\n📁 PDF saved to Bank Statements/ folder':'')));
   }catch(err){
     st.innerHTML+=`<div class="pstep"><div class="dot" style="background:var(--red)">!</div><span style="color:var(--red)">Error: ${err.message}</span></div>`;
   }
@@ -1989,6 +2105,7 @@ window.addEventListener('load',()=>{
   setTimeout(()=>{try{rChart();}catch(e){}},200);
   try{reclassifyMaint(true);}catch(e){console.error('reclassify:',e);}
   try{syncHealthFromMaint(true);}catch(e){console.error('health-sync:',e);}
+  try{initGoogleAuth();}catch(e){console.error('google-auth-init:',e);}
   const h=JSON.parse(localStorage.getItem('gw_health')||'{}');
   if(h.odo)try{rHealth(h);}catch(e){}
 });
