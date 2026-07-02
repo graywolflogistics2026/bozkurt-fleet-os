@@ -173,6 +173,9 @@ canvas{max-height:160px;}
       </div>
       <div class="g4" style="margin-bottom:12px">
         <div class="sc"><div class="sl">Business Balance</div><div class="sv ta" id="d-bizbal">$60,000.00</div><div class="sch">checking account</div></div>
+        <div class="sc"><div class="sl">Revenue / Mile</div><div class="sv tg" id="d-rpm">—</div><div class="sch">gross ÷ total miles</div></div>
+        <div class="sc"><div class="sl">Cost / Mile (CPM)</div><div class="sv tr" id="d-cpm">—</div><div class="sch">all costs ÷ total miles</div></div>
+        <div class="sc"><div class="sl">Profit / Mile</div><div class="sv" id="d-ppm">—</div><div class="sch">accept loads above CPM!</div></div>
       </div>
 
       <div class="g4" style="margin-bottom:12px">
@@ -310,9 +313,9 @@ canvas{max-height:160px;}
     <!-- DEDUCTIONS -->
     <div id="pg-ded" class="pg">
       <div class="g3">
-        <div class="sc"><div class="sl">Variable</div><div class="sv tr" id="ded-var">$0.00</div></div>
-        <div class="sc"><div class="sl">Fixed</div><div class="sv tr" id="ded-fix">$0.00</div></div>
-        <div class="sc"><div class="sl">Total</div><div class="sv tr" id="ded-tot">$0.00</div></div>
+        <div class="sc"><div class="sl">Tax Deductible (Out-of-Pocket)</div><div class="sv tg" id="ded-tot">$0.00</div></div>
+        <div class="sc"><div class="sl">Withheld from Settlement</div><div class="sv" id="ded-var" style="color:var(--mut)">$0.00</div></div>
+        <div class="sc"><div class="sl">Combined Total</div><div class="sv tr" id="ded-fix">$0.00</div></div>
       </div>
       <div class="card"><div id="ded-tbl"><div class="empty">Import PDF</div></div></div>
       <div class="card">
@@ -321,6 +324,7 @@ canvas{max-height:160px;}
           <div style="grid-column:span 3"><div class="fl">Description</div><input class="fi" id="md-desc" placeholder="e.g. LLC formation fee — Texas Secretary of State"></div>
           <div><div class="fl">Category</div>
             <select class="fi" id="md-cat">
+              <option>Software & Subscriptions</option>
               <option>Legal & Accounting Fees</option>
               <option>Insurance</option>
               <option>Licensing & Permits</option>
@@ -469,6 +473,16 @@ canvas{max-height:160px;}
         <div class="card"><div class="ct">30-Day Forecast</div><div id="cf-fore"><div class="empty">Enter inputs</div></div></div>
       </div>
       <div class="card"><div class="ct">4-Week Timeline</div><div id="cf-time"></div></div>
+      <div class="card">
+        <div class="ct">📈 Weekly Net Pay Trend</div>
+        <p style="color:var(--mut);font-size:11px;margin-bottom:8px">Net pay per settlement week — spot a declining trend early.</p>
+        <div style="height:220px"><canvas id="chartWeekly"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="ct">🚛 Load Profitability — Best & Worst Lanes</div>
+        <p style="color:var(--mut);font-size:11px;margin-bottom:8px">Rate per loaded mile by load, from your settlement history. Use this to know which lanes/rates to chase and which to decline.</p>
+        <div id="load-profit"><div class="empty">Import settlement PDFs with load data</div></div>
+      </div>
     </div>
 
     <!-- SCORECARD -->
@@ -861,13 +875,14 @@ canvas{max-height:160px;}
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <button class="btn" onclick="exportData()">⬇ Export JSON</button>
           <button onclick="document.getElementById('impfile').click()" style="background:rgba(34,197,94,.1);border:1px solid var(--grn);color:var(--grn);padding:7px 12px;border-radius:7px;font-size:12px;cursor:pointer">📂 Import Backup</button>
+          <button onclick="clearFinancialData()" style="background:rgba(245,158,11,.1);border:1px solid var(--org);color:var(--org);padding:7px 12px;border-radius:7px;font-size:12px;cursor:pointer">🔄 Reset Financial Data Only (keeps Truck Health)</button>
           <button onclick="clearAll()" style="background:rgba(239,68,68,.1);border:1px solid var(--red);color:var(--red);padding:7px 12px;border-radius:7px;font-size:12px;cursor:pointer">⚠️ Clear All Data</button>
         </div>
         <input type="file" id="impfile" accept=".json" style="display:none" onchange="importData(this.files[0])">
       </div>
       <div class="card">
         <div class="ct">☁️ Google Drive — Real Auto-Upload</div>
-        <p style="color:var(--mut);font-size:12px;margin-bottom:10px">When connected, every saved PDF automatically uploads in the background to <b>graywolflogistics2026 documents/&lt;Month&gt;/&lt;Category&gt;/</b> in your Google Drive — organized by the document's own date, then by type (Payroll, Fuel, Maintenance, or the store name for purchases like Amazon / Home Depot). No download dialogs, no manual steps.</p>
+        <p style="color:var(--mut);font-size:12px;margin-bottom:10px">When connected, every saved PDF automatically uploads in the background to your Google Drive under <b>graywolflogistics2026 documents/</b>, organized by the document's own date: settlements go to <b>&lt;Month&gt;/Payroll/Week-1..5/</b>, purchases to <b>&lt;Month&gt;/Equipment-Deductions/&lt;Store&gt;/</b> (Amazon, Home Depot, etc.), and Fuel / Maintenance / Tolls / Bank Statements each get their own monthly folder. No download dialogs, no manual steps.</p>
         <div id="drive-status" style="margin-bottom:10px"></div>
         <div style="display:flex;gap:8px">
           <button class="btn" onclick="connectGoogleDrive()">🔗 Connect Google Drive</button>
@@ -934,7 +949,27 @@ canvas{max-height:160px;}
 </div>
 <script>
 // ═══ DB ═══
-function loadDB(){try{const s=localStorage.getItem('gw_db');if(s)return JSON.parse(s);}catch(e){}return{sett:[],loads:[],fuel:{tr:[],re:[]},reimb:[],ded:[],maint:[],tolls:{ez:[],dw:[]},loans:[],assets:{tr:null,apu:null},op:{},docs:[]};}
+function loadDB(){
+  const defaults={sett:[],loads:[],fuel:{tr:[],re:[]},reimb:[],ded:[],maint:[],tolls:{ez:[],dw:[]},loans:[],assets:{tr:null,apu:null},op:{},docs:[]};
+  try{
+    const s=localStorage.getItem('gw_db');
+    if(s){
+      const d=JSON.parse(s);
+      // Migration: backfill any structure fields added in later versions so old saved data
+      // never crashes new code paths (e.g. DB.docs.push on data saved before docs existed).
+      Object.keys(defaults).forEach(k=>{if(d[k]===undefined)d[k]=defaults[k];});
+      if(!d.fuel)d.fuel={tr:[],re:[]};
+      if(!d.fuel.tr)d.fuel.tr=[];
+      if(!d.fuel.re)d.fuel.re=[];
+      if(!d.tolls)d.tolls={ez:[],dw:[]};
+      if(!d.tolls.ez)d.tolls.ez=[];
+      if(!d.tolls.dw)d.tolls.dw=[];
+      if(!d.assets)d.assets={tr:null,apu:null};
+      return d;
+    }
+  }catch(e){}
+  return defaults;
+}
 function saveDB(){localStorage.setItem('gw_db',JSON.stringify(DB));}
 const DB=loadDB();
 const LOANS=JSON.parse(localStorage.getItem('gw_loans')||JSON.stringify([
@@ -1075,6 +1110,29 @@ function orgFolderName(dt,vendor){
   if(map[dt])return map[dt];
   if((dt==='amazon'||dt==='store')&&vendor)return vendor.trim().replace(/[\/\\]/g,'-')||'Purchases';
   return 'Other';
+}
+// Week number within the month (1-5) from the document date — used to split Payroll into
+// Week-1..Week-5 subfolders so each month's four (sometimes five) settlements stay separated.
+function weekOfMonth(dateStr){
+  const m=(dateStr||'').match(/^\d{4}-\d{2}-(\d{2})/);
+  if(!m)return null;
+  return Math.min(5,Math.ceil(parseInt(m[1],10)/7));
+}
+// Builds the FULL folder path array for a document:
+//   settlement            → [Month, 'Payroll', 'Week-N']
+//   store purchase        → [Month, 'Equipment-Deductions', StoreName]
+//   everything else       → [Month, Category]
+function buildDocFolderParts(dt,dateStr,vendor){
+  const month=monthFolder(dateStr);
+  if(dt==='settlement'){
+    const wk=weekOfMonth(dateStr);
+    return wk?[month,'Payroll','Week-'+wk]:[month,'Payroll'];
+  }
+  if(dt==='amazon'||dt==='store'){
+    const store=(vendor||'Unknown Store').trim().replace(/[\/\\]/g,'-');
+    return [month,'Equipment-Deductions',store];
+  }
+  return [month,orgFolderName(dt,vendor)];
 }
 function autoSaveEnabled(){return localStorage.getItem('gw_autosave')!=='0';}
 
@@ -1229,7 +1287,7 @@ function go(id,el){
   if(el)el.classList.add('on');
   $('ptitle').textContent=TITLES[id]||id;
   $('psub').textContent=SUBS[id]||'';
-  const renders={dash:rDash,loads:rLoads,sett:rSett,reimb:rReimb,fuel:rFuel,maint:rMaint,tolls:rTolls,ded:rDed,assets:rAssets,capital:rCapital,oper:rOper,health:()=>{const h=JSON.parse(localStorage.getItem('gw_health')||'{}');if($('h-odo'))$('h-odo').value=h.odo||'';if($('h-mpg'))$('h-mpg').value=h.mpg||8.9;if($('h-oil-mi'))$('h-oil-mi').value=h.lastOil||'';if($('h-fuel-mi'))$('h-fuel-mi').value=h.lastFuelFilter||'';if($('h-dpf-mi'))$('h-dpf-mi').value=h.lastDpf||'';if($('h-def-mi'))$('h-def-mi').value=h.lastDef||'';if($('h-coolext-mi'))$('h-coolext-mi').value=h.lastCoolExt||'';if($('h-coolant-mi'))$('h-coolant-mi').value=h.lastCoolant||'';if($('h-trans-mi'))$('h-trans-mi').value=h.lastTrans||'';if($('h-trans-fluid'))$('h-trans-fluid').value=h.transSynthetic!==false?'synthetic':'conventional';if($('h-diff-mi'))$('h-diff-mi').value=h.lastDiff||'';if($('h-diff-fluid'))$('h-diff-fluid').value=h.diffSynthetic!==false?'synthetic':'conventional';if($('h-airfilter-mi'))$('h-airfilter-mi').value=h.lastAirFilter||'';if($('h-airdryer-mi'))$('h-airdryer-mi').value=h.lastAirDryer||'';if($('h-chassis-mi'))$('h-chassis-mi').value=h.lastChassis||'';if($('h-apu-hrs'))$('h-apu-hrs').value=h.apuHours||10054;if($('h-apu-svc-hrs'))$('h-apu-svc-hrs').value=h.lastApuHours||10050;if(h.coolantDate&&$('h-cool'))$('h-cool').value=h.coolantDate;if(h.odo)rHealth(h);},cashflow:()=>{},score:rScore,loanc:rLoanc,cards:rCards,bankstmt:()=>{rBankStmt();rCheckingStmt();},areg:rAreg,acct:rAcct,ai:()=>{},tax:syncTax,settings:rSettings};
+  const renders={dash:rDash,loads:rLoads,sett:rSett,reimb:rReimb,fuel:rFuel,maint:rMaint,tolls:rTolls,ded:rDed,assets:rAssets,capital:rCapital,oper:rOper,health:()=>{const h=JSON.parse(localStorage.getItem('gw_health')||'{}');if($('h-odo'))$('h-odo').value=h.odo||'';if($('h-mpg'))$('h-mpg').value=h.mpg||8.9;if($('h-oil-mi'))$('h-oil-mi').value=h.lastOil||'';if($('h-fuel-mi'))$('h-fuel-mi').value=h.lastFuelFilter||'';if($('h-dpf-mi'))$('h-dpf-mi').value=h.lastDpf||'';if($('h-def-mi'))$('h-def-mi').value=h.lastDef||'';if($('h-coolext-mi'))$('h-coolext-mi').value=h.lastCoolExt||'';if($('h-coolant-mi'))$('h-coolant-mi').value=h.lastCoolant||'';if($('h-trans-mi'))$('h-trans-mi').value=h.lastTrans||'';if($('h-trans-fluid'))$('h-trans-fluid').value=h.transSynthetic!==false?'synthetic':'conventional';if($('h-diff-mi'))$('h-diff-mi').value=h.lastDiff||'';if($('h-diff-fluid'))$('h-diff-fluid').value=h.diffSynthetic!==false?'synthetic':'conventional';if($('h-airfilter-mi'))$('h-airfilter-mi').value=h.lastAirFilter||'';if($('h-airdryer-mi'))$('h-airdryer-mi').value=h.lastAirDryer||'';if($('h-chassis-mi'))$('h-chassis-mi').value=h.lastChassis||'';if($('h-apu-hrs'))$('h-apu-hrs').value=h.apuHours||10054;if($('h-apu-svc-hrs'))$('h-apu-svc-hrs').value=h.lastApuHours||10050;if(h.coolantDate&&$('h-cool'))$('h-cool').value=h.coolantDate;if(h.odo)rHealth(h);},cashflow:()=>{rWeeklyTrend();rLoadProfit();},score:rScore,loanc:rLoanc,cards:rCards,bankstmt:()=>{rBankStmt();rCheckingStmt();},areg:rAreg,acct:rAcct,ai:()=>{},tax:syncTax,settings:rSettings};
   try{if(renders[id])renders[id]();}catch(e){console.error('render',id,e);}
   if(id==='dash')setTimeout(()=>{try{rChart();}catch(e){}},100);
 }
@@ -1274,6 +1332,17 @@ function rDash(){
   if($('d-weeks'))$('d-weeks').textContent=DB.sett.length;
   const avgNet=DB.sett.length?net/DB.sett.length:0;
   if($('d-avgnet'))$('d-avgnet').textContent=fmt(avgNet);
+  // Cost-per-mile: THE owner-operator metric. Total cost = everything withheld from
+  // settlements + everything paid out-of-pocket. Revenue = gross. Miles = settlement miles.
+  const totalMiles=DB.sett.reduce((a,x)=>a+(x.miles||0),0);
+  if(totalMiles>0){
+    const grossRev=DB.sett.reduce((a,x)=>a+(x.gross||0),0);
+    const totalCost=DB.ded.reduce((a,x)=>a+(x.amount||0),0);
+    const rpm=grossRev/totalMiles,cpm=totalCost/totalMiles,ppm=rpm-cpm;
+    if($('d-rpm'))$('d-rpm').textContent='$'+rpm.toFixed(2);
+    if($('d-cpm'))$('d-cpm').textContent='$'+cpm.toFixed(2);
+    if($('d-ppm')){$('d-ppm').textContent='$'+ppm.toFixed(2);$('d-ppm').style.color=ppm>0.5?'var(--grn)':ppm>0?'var(--org)':'var(--red)';}
+  }
 
   rCapital();
 }
@@ -1315,6 +1384,38 @@ function rCapital(){
       $('cap-draw-history').innerHTML=allRows.map(d=>`<div class="osr" style="font-size:11px;align-items:center"><span class="tm">${d.date}${d.note?' — '+d.note:''}</span><span style="display:flex;align-items:center;gap:6px"><span style="color:${d._type==='draw'?'var(--red)':'var(--grn)'}">${d._type==='draw'?'-':'+'}${fmt(d.amount)}</span>${d._type==='draw'?`<button onclick="deleteDraw('${d.id}')" title="Delete this draw" style="background:none;border:1px solid var(--red);color:var(--red);padding:0 5px;border-radius:4px;font-size:9px;cursor:pointer">✕</button>`:`<span title="Linked to a deduction — edit the payment method on the Deductions page to change this" style="color:var(--mut);cursor:help">🔗</span>`}</span></div>`).join('');
     }
   }
+}
+let weeklyChartInst=null;
+// Line chart of net pay per settlement week — makes a declining earnings trend obvious early.
+function rWeeklyTrend(){
+  const c=$('chartWeekly');if(!c||typeof Chart==='undefined')return;
+  const sorted=[...DB.sett].sort((a,b)=>new Date(a.weekEnding||a.date)-new Date(b.weekEnding||b.date));
+  if(!sorted.length)return;
+  const labels=sorted.map(s=>s.weekEnding||s.date||'?');
+  const nets=sorted.map(s=>s.net||0);
+  const grosses=sorted.map(s=>s.gross||0);
+  if(weeklyChartInst)weeklyChartInst.destroy();
+  weeklyChartInst=new Chart(c,{type:'line',data:{labels,datasets:[
+    {label:'Net Pay',data:nets,borderColor:'#22c55e',backgroundColor:'rgba(34,197,94,.1)',fill:true,tension:.3},
+    {label:'Gross',data:grosses,borderColor:'#4f7cff',backgroundColor:'transparent',tension:.3,borderDash:[5,4]}
+  ]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#8b93a7',font:{size:10}}}},scales:{x:{ticks:{color:'#8b93a7',font:{size:9}},grid:{color:'rgba(139,147,167,.08)'}},y:{ticks:{color:'#8b93a7',font:{size:9},callback:v=>'$'+v.toLocaleString()},grid:{color:'rgba(139,147,167,.08)'}}}}});
+}
+// Ranks all loads from settlement history by rate-per-loaded-mile: top 5 best, bottom 5 worst.
+function rLoadProfit(){
+  const el=$('load-profit');if(!el)return;
+  const loads=DB.loads.filter(l=>(l.loadedMiles||0)>0&&(l.revenue||0)>0)
+    .map(l=>({...l,rpm:(l.revenue||0)/(l.loadedMiles||1)}));
+  if(!loads.length){el.innerHTML='<div class="empty">Import settlement PDFs with load data</div>';return;}
+  const sorted=[...loads].sort((a,b)=>b.rpm-a.rpm);
+  const avg=loads.reduce((a,x)=>a+x.rpm,0)/loads.length;
+  const best=sorted.slice(0,5),worst=sorted.slice(-5).reverse();
+  const row=(l,good)=>`<tr><td class="tm" style="font-size:11px">${l.from||'?'} → ${l.to||'?'}</td><td class="ta" style="font-size:11px">${l.order||'—'}</td><td style="font-size:11px">${(l.loadedMiles||0).toLocaleString()} mi</td><td class="tr">${fmt(l.revenue||0)}</td><td style="font-weight:700;color:${good?'var(--grn)':'var(--red)'}">$${l.rpm.toFixed(2)}/mi</td></tr>`;
+  el.innerHTML=
+    `<div style="font-size:12px;margin-bottom:8px">Average across ${loads.length} loads: <b style="color:var(--acc)">$${avg.toFixed(2)}/loaded mi</b></div>`+
+    '<div class="ct" style="font-size:12px;margin-bottom:4px;color:var(--grn)">🏆 Best Lanes</div>'+
+    '<table><thead><tr><th>Lane</th><th>Order</th><th>Loaded Mi</th><th>Revenue</th><th>Rate</th></tr></thead><tbody>'+best.map(l=>row(l,true)).join('')+'</tbody></table>'+
+    '<div class="ct" style="font-size:12px;margin:12px 0 4px;color:var(--red)">⚠️ Worst Lanes</div>'+
+    '<table><thead><tr><th>Lane</th><th>Order</th><th>Loaded Mi</th><th>Revenue</th><th>Rate</th></tr></thead><tbody>'+worst.map(l=>row(l,false)).join('')+'</tbody></table>';
 }
 function rChart(){
   const c=$('chartMain');if(!c||typeof Chart==='undefined')return;
@@ -1626,8 +1727,34 @@ function syncHealthFromMaint(silent){
   return any;
 }
 function rTolls(){const ez=DB.tolls.ez.reduce((a,x)=>a+(x.amount||0),0),dw=DB.tolls.dw.reduce((a,x)=>a+(x.amount||0),0);$('t-ez').textContent=fmt(ez);$('t-dw').textContent=fmt(dw);$('t-tot').textContent=fmt(ez+dw);const tt=(arr,id)=>{$(id).innerHTML=arr.length?'<div style="max-height:180px;overflow-y:auto">'+arr.map(x=>`<div class="cf"><span class="tm">${x.date?fd(x.date)+' — ':''} ${x.location||'—'}</span><span>${fmt(x.amount)}</span></div>`).join('')+'</div>':'<div class="empty">Import PDF</div>';};tt(DB.tolls.ez,'t-eztbl');tt(DB.tolls.dw,'t-dwtbl');}
-const DED_CATEGORIES=['Legal & Accounting Fees','Insurance','Licensing & Permits','Tools & Equipment','Electronics','Comfort & Sleeper','Truck Supplies','Safety Equipment','Misc','Other'];
-function rDed(){const t=DB.ded.reduce((a,x)=>a+(x.amount||0),0);$('ded-tot').textContent=fmt(t);$('ded-var').textContent=fmt(DB.fuel.tr.reduce((a,x)=>a+(x.amount||0),0)+DB.fuel.re.reduce((a,x)=>a+(x.amount||0),0));$('ded-fix').textContent=fmt(DB.ded.filter(x=>/NP|truck|rent|LP|license/i.test((x.code||'')+(x.desc||''))).reduce((a,x)=>a+(x.amount||0),0));if(!DB.ded.length){$('ded-tbl').innerHTML='<div class="empty">Import PDF</div>';return;}$('ded-tbl').innerHTML='<table><thead><tr><th>Code</th><th>Description</th><th>Store</th><th>Category</th><th>Payment</th><th>Amount</th><th></th></tr></thead><tbody>'+DB.ded.map((x,i)=>`<tr><td class="ta">${x.code||'—'}</td><td>${x.desc||'—'}</td><td class="tm" style="font-size:11px">${x.store||'—'}</td><td style="font-size:11px"><span style="cursor:pointer;text-decoration:underline dotted;color:var(--acc)" onclick="editDedItem(${i})" title="Click to change category or payment">${x.category||'—'}</span></td><td style="font-size:11px"><span style="cursor:pointer;text-decoration:underline dotted;color:${isPersonalPayment(x.payment)?'var(--org)':'var(--mut)'}" onclick="editDedItem(${i})" title="Click to change category or payment">${x.payment||'—'}${isPersonalPayment(x.payment)?' 💰':''}</span></td><td class="tr">${fmt(x.amount)}</td><td><button onclick="deleteDed(${i})" style="background:none;border:1px solid var(--red);color:var(--red);padding:2px 7px;border-radius:4px;font-size:10px;cursor:pointer">✕</button></td></tr>`).join('')+'</tbody></table>';}
+const DED_CATEGORIES=['Software & Subscriptions','Legal & Accounting Fees','Insurance','Licensing & Permits','Tools & Equipment','Electronics','Comfort & Sleeper','Truck Supplies','Safety Equipment','Misc','Other'];
+// Splits deductions into two classes with different tax treatment:
+// - "settlement" source: withheld from payroll by Prime (ELD, insurance, truck payment...).
+//   Already reflected in NET pay — shown for visibility but NOT counted again as a tax
+//   deduction (counting them again against net income would be double-dipping).
+// - everything else: paid out-of-pocket (business card / personal) — THESE are the tax
+//   deductions the estimator uses on top of net pay.
+function isSettlementDed(x){return x.source==='settlement'||x.payment==='Settlement Withheld';}
+function outOfPocketDeds(){return DB.ded.filter(x=>!isSettlementDed(x));}
+function settlementDeds(){return DB.ded.filter(isSettlementDed);}
+function dedRow(x,i){
+  return `<tr><td class="ta">${x.code||'—'}</td><td>${x.desc||'—'}</td><td class="tm" style="font-size:11px">${x.store||'—'}</td><td style="font-size:11px"><span style="cursor:pointer;text-decoration:underline dotted;color:var(--acc)" onclick="editDedItem(${i})" title="Click to change category or payment">${x.category||'—'}</span></td><td style="font-size:11px"><span style="cursor:pointer;text-decoration:underline dotted;color:${isPersonalPayment(x.payment)?'var(--org)':'var(--mut)'}" onclick="editDedItem(${i})" title="Click to change category or payment">${x.payment||'—'}${isPersonalPayment(x.payment)?' 💰':''}</span></td><td class="tr">${fmt(x.amount)}</td><td><button onclick="deleteDed(${i})" style="background:none;border:1px solid var(--red);color:var(--red);padding:2px 7px;border-radius:4px;font-size:10px;cursor:pointer">✕</button></td></tr>`;
+}
+function rDed(){
+  const oop=outOfPocketDeds(),wh=settlementDeds();
+  const oopT=oop.reduce((a,x)=>a+(x.amount||0),0),whT=wh.reduce((a,x)=>a+(x.amount||0),0);
+  if($('ded-tot'))$('ded-tot').textContent=fmt(oopT);
+  if($('ded-var'))$('ded-var').textContent=fmt(whT);
+  if($('ded-fix'))$('ded-fix').textContent=fmt(oopT+whT);
+  if(!DB.ded.length){$('ded-tbl').innerHTML='<div class="empty">Import PDF</div>';return;}
+  const head='<table><thead><tr><th>Code</th><th>Description</th><th>Store</th><th>Category</th><th>Payment</th><th>Amount</th><th></th></tr></thead><tbody>';
+  let html='';
+  html+='<div class="ct" style="margin-bottom:6px">💳 Out-of-Pocket — <span style="color:var(--grn)">tax deductible</span> <span style="color:var(--mut);font-weight:400;font-size:11px">(paid by you: business card, personal card, cash)</span></div>';
+  html+=oop.length?head+DB.ded.map((x,i)=>isSettlementDed(x)?'':dedRow(x,i)).join('')+'</tbody></table>':'<div class="empty" style="padding:14px">None yet</div>';
+  html+='<div class="ct" style="margin:16px 0 6px">🏦 Withheld from Settlement — <span style="color:var(--mut)">already reflected in net pay, NOT re-deducted</span> <span style="color:var(--mut);font-weight:400;font-size:11px">(ELD, insurance, truck payment — Prime deducts these before paying you)</span></div>';
+  html+=wh.length?head+DB.ded.map((x,i)=>isSettlementDed(x)?dedRow(x,i):'').join('')+'</tbody></table>':'<div class="empty" style="padding:14px">None yet — import a settlement PDF</div>';
+  $('ded-tbl').innerHTML=html;
+}
 function editDedItem(i){
   const x=DB.ded[i];
   if(!x)return;
@@ -2029,8 +2156,8 @@ function rSettings(){
       :'<span style="color:var(--grn);font-weight:600">✏️ Editing is allowed on this device</span>';
   }
 }
-function exportData(){
-  const payload={
+function buildBackupPayload(){
+  return {
     DB,loans:LOANS,cards:CARDS,
     capitalDraws:CAPITAL.draws,
     capitalContributions:CAPITAL.extraContributions,
@@ -2041,10 +2168,29 @@ function exportData(){
     autoSave:localStorage.getItem('gw_autosave')||'1',
     exportedAt:new Date().toISOString()
   };
-  const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
+}
+function exportData(){
+  const blob=new Blob([JSON.stringify(buildBackupPayload(),null,2)],{type:'application/json'});
   const url=URL.createObjectURL(blob);const a=document.createElement('a');
   a.href=url;a.download='graywolf-backup-'+new Date().toISOString().split('T')[0]+'.json';
   a.click();URL.revokeObjectURL(url);
+}
+// Silently uploads a fresh full JSON backup to Drive (Backups/ folder, one file per day —
+// same-day re-imports just add a fresh timestamped copy). Runs after every successful import
+// so the newest data is always recoverable even if this browser's localStorage is lost.
+async function autoBackupToDrive(){
+  if(!driveConnected())return false;
+  try{
+    const ok=await ensureDriveToken();
+    if(!ok)return false;
+    const payload=JSON.stringify(buildBackupPayload(),null,2);
+    const blob=new Blob([payload],{type:'application/json'});
+    const rootId=await driveFindOrCreateFolder(DRIVE_ROOT_FOLDER,null);
+    const bkId=await driveFindOrCreateFolder('Backups',rootId);
+    const ts=new Date().toISOString().replace(/[:.]/g,'-').slice(0,19);
+    await driveUploadFile(blob,'graywolf-backup-'+ts+'.json',bkId);
+    return true;
+  }catch(e){console.error('Auto-backup to Drive failed:',e);return false;}
 }
 function importData(file){
   if(guardReadOnly())return;
@@ -2053,7 +2199,7 @@ function importData(file){
   r.onload=e=>{
     try{
       const d=JSON.parse(e.target.result);
-      if(d.DB)Object.assign(DB,d.DB);
+      if(d.DB){Object.assign(DB,d.DB);if(!DB.docs)DB.docs=[];if(!DB.reimb)DB.reimb=[];if(!DB.fuel)DB.fuel={tr:[],re:[]};if(!DB.tolls)DB.tolls={ez:[],dw:[]};}
       if(d.loans){LOANS.length=0;d.loans.forEach(x=>LOANS.push(x));localStorage.setItem('gw_loans',JSON.stringify(LOANS));}
       if(d.cards){CARDS.length=0;d.cards.forEach(x=>CARDS.push(x));localStorage.setItem('gw_cards',JSON.stringify(CARDS));}
       if(d.capitalDraws){CAPITAL.draws.length=0;d.capitalDraws.forEach(x=>CAPITAL.draws.push(x));saveDraws();}
@@ -2075,6 +2221,25 @@ function importData(file){
 }
 function clearAll(){
   if(guardReadOnly())return;if(!confirm('Delete ALL data? Cannot be undone.'))return;if(!confirm('FINAL WARNING. Continue?'))return;['gw_db','gw_loans','gw_cards','gw_assets','gw_health','gw_apikey','gw_draws','gw_contributions','gw_bizbal','gw_bankstmts','gw_chkstmts','gw_autosave','gw_drive_connected','gw_drive_folders'].forEach(k=>localStorage.removeItem(k));location.reload();}
+// Selective reset for a clean re-import: wipes ONLY financial records (settlements, loads,
+// fuel, deductions, reimbursements, tolls, duplicate-detection docs, bank/checking statements,
+// contributions tied to deleted deductions, business balance back to $60K base).
+// PRESERVES: Truck Health setup, the full Maintenance log, APU hours, owner draws,
+// loans/cards, business info, API key, Google Drive connection, all settings.
+function clearFinancialData(){
+  if(guardReadOnly())return;
+  if(!confirm('Reset FINANCIAL data only?\n\nDeletes: settlements, loads, fuel, deductions, tolls, bank/checking statements, capital contributions from purchases, and duplicate-import records. Resets business balance to $60,000.\n\nKEEPS: Truck Health, Maintenance history, APU hours, owner draws, loans, cards, API key, Google Drive connection.'))return;
+  if(!confirm('Are you sure? This cannot be undone (export a backup first if unsure).'))return;
+  DB.sett=[];DB.loads=[];DB.fuel={tr:[],re:[]};DB.ded=[];DB.reimb=[];DB.tolls={ez:[],dw:[]};DB.docs=[];DB.op={};
+  saveDB();
+  CAPITAL.extraContributions=[];saveContributions();
+  localStorage.setItem('gw_bizbal','60000');
+  localStorage.removeItem('gw_bankstmts');
+  localStorage.removeItem('gw_chkstmts');
+  BANK_STMTS.length=0;CHK_STMTS.length=0;
+  alert('✅ Financial data reset. Truck Health & Maintenance untouched.\n\nYou can now re-import your PDFs cleanly — no duplicate warnings, and files will land in the new Week-by-week Drive folders.');
+  location.reload();
+}
 
 // ═══ AI ADVISOR ═══
 const aiHist=[];
@@ -2097,8 +2262,11 @@ function calcPerDiemDays(){
   return days;
 }
 function syncTax(){
-  const rev=DB.op.ytdRevenue||DB.sett.reduce((a,x)=>a+(x.gross||0),0);
-  const exp=DB.op.ytdExpenses||DB.ded.reduce((a,x)=>a+(x.amount||0),0);
+  // Net-pay model: income = NET settlements (payroll deductions like ELD/insurance are already
+  // subtracted by Prime before payment, so they are NOT re-deducted here — that would be
+  // double-dipping). Expenses = only what was paid out-of-pocket + per diem.
+  const rev=DB.sett.reduce((a,x)=>a+(x.net||0),0);
+  const exp=outOfPocketDeds().reduce((a,x)=>a+(x.amount||0),0);
   const perDiemDays=calcPerDiemDays();
   const perDiemDeduct=perDiemDays*64;
   if(rev){
@@ -2110,7 +2278,7 @@ function syncTax(){
     calcTax();
     // Show per diem note
     const pd=$('perdiem-note');
-    if(pd)pd.innerHTML=`<div style="background:rgba(79,124,255,.1);border:1px solid var(--acc);border-radius:7px;padding:10px;margin-bottom:10px;font-size:11px"><b style="color:var(--acc)">📅 Per Diem Auto-Calculated</b><br>${perDiemDays} days on road × $64/day = <b style="color:var(--grn)">${fmt(perDiemDeduct)}</b> deduction included in expenses</div>`;
+    if(pd)pd.innerHTML=`<div style="background:rgba(79,124,255,.1);border:1px solid var(--acc);border-radius:7px;padding:10px;margin-bottom:10px;font-size:11px"><b style="color:var(--acc)">📅 Per Diem Auto-Calculated</b><br>${perDiemDays} days on road × $64/day = <b style="color:var(--grn)">${fmt(perDiemDeduct)}</b> deduction included in expenses<br><span style="color:var(--mut)">ℹ️ Income = NET settlement pay (ELD/insurance/truck payments Prime withholds are already out — not double-counted). Expenses = your out-of-pocket purchases only.</span></div>`;
     // Update dashboard tax cards
     const txTot=$('tx-all');const txQtr=$('tx-qtr');
     if(txTot&&$('d-tax-est')){
@@ -2120,7 +2288,19 @@ function syncTax(){
       const np=rev-exp-perDiemDeduct;
       const rate=np>0?((tot/np)*100).toFixed(1)+'%':'—';
       if($('d-tax-est'))$('d-tax-est').textContent=fmt(tot);
-      if($('d-tax-qtr'))$('d-tax-qtr').textContent=fmt(qtr);
+      if($('d-tax-qtr')){
+        $('d-tax-qtr').textContent=fmt(qtr);
+        // 2026 estimated tax due dates (IRS): Q1 Apr 15, Q2 Jun 15, Q3 Sep 15, Q4 Jan 15 2027
+        const deadlines=[['Q1','2026-04-15'],['Q2','2026-06-15'],['Q3','2026-09-15'],['Q4','2027-01-15']];
+        const today=new Date();today.setHours(0,0,0,0);
+        const next=deadlines.find(d=>new Date(d[1]+'T00:00:00')>=today);
+        const sub=$('d-tax-qtr').parentElement.querySelector('.sch');
+        if(next&&sub){
+          const days=Math.ceil((new Date(next[1]+'T00:00:00')-today)/86400000);
+          sub.textContent=next[0]+' due in '+days+' day'+(days===1?'':'s')+' ('+next[1]+')';
+          sub.style.color=days<=14?'var(--red)':days<=30?'var(--org)':'var(--mut)';
+        }
+      }
       if($('d-tax-wk'))$('d-tax-wk').textContent=fmt(wkly);
       if($('d-tax-rate'))$('d-tax-rate').textContent=rate;
       if($('d-tax-wk'))$('d-tax-wk').style.color=wkly>300?'var(--org)':'var(--grn)';
@@ -2167,6 +2347,7 @@ Return ONLY JSON.`;
     const _bsFolder=[monthNameToFolder(parsed.month),orgFolderName('bankstmt')];
     downloadOrganizedFile(file,_bsFolder,_bsFname);
     const _bsDrive=driveConnected()?await uploadToOrganizedDrive(file,_bsFolder,_bsFname):false;
+    autoBackupToDrive();
     closePDF();window._bankStmtMode=false;
     bsTab('card');rBankStmt();
     alert('✅ Statement imported!\nView only — no deductions added.\n'+(parsed.transactions||[]).length+' transactions categorized.'+(_bsDrive?'\n☁️ Uploaded to Google Drive':''));
@@ -2177,14 +2358,14 @@ Return ONLY JSON.`;
 
 async function handleFile(file){
   if(window._checkingMode){await importCheckingStatement(file);return;}
-  if(window._bankStmtMode){await importBankStatement(file);return;}if(!file)return;$('dz').style.display='none';$('progbox').style.display='block';$('rprev').style.display='none';const st=$('steps');st.innerHTML='';for(let i=0;i<STEPS.length-1;i++){await new Promise(r=>setTimeout(r,250));st.innerHTML+=`<div class="pstep"><div class="dot ok">✓</div><span>${STEPS[i]}</span></div>`;}st.innerHTML+=`<div class="pstep"><div class="dot sp"></div><span>${STEPS[STEPS.length-1]}</span></div>`;try{const b64=await toB64(file);const isImg=file.type.startsWith('image/');const mt=file.type||'application/pdf';const prompt=`Parse this document for Graywolf Logistics LLC (Ali Bozkurt, Prime Inc. owner-operator, Unit 830157). Return ONLY raw JSON starting with { ending with }. No markdown.\n\ndocType: settlement|fuel|maintenance|amazon|store|toll|loan|other\n\nFor settlement: {"docType":"settlement","date":"YYYY-MM-DD","vendor":"","totalAmount":0,"taxDeductible":true,"bizPct":100,"summary":"","settlement":{"weekEnding":"","carrier":"","unit":"","grossRevenue":0,"reimbursements":0,"totalDeductions":0,"netPay":0,"totalMiles":0,"loadedMiles":0,"revenueItems":[{"desc":"","order":"","amount":0}],"reimbursementItems":[{"desc":"","ref":"","amount":0}],"loads":[{"order":"","from":"","to":"","loadedMiles":0,"emptyMiles":0,"revenue":0,"rate":0,"shipper":""}],"tractorFuel":[{"date":"","location":"","gallons":0,"amount":0,"discount":0}],"reeferFuel":[{"date":"","location":"","gallons":0,"amount":0,"discount":0}],"deductions":[{"code":"","desc":"","balance":0,"amount":0,"category":"Legal & Accounting Fees|Insurance|Licensing & Permits|Fixed|Variable|Other"}],"maintenance":[{"invoice":"","unit":"","desc":"","odometer":0,"serviceType":"oil|fuel|valve|dpf|def|coolext|coolant|trans|tires|brakes|general|other","parts":0,"labor":0,"total":0,"covered":0}],"tolls":{"ezpass":{"total":0,"items":[]},"drivewyze":{"total":0,"items":[]}},"loans":[{"name":"","balance":0,"payment":0,"frequency":"","nextDue":""}],"assets":{"tractor":{"unit":"","year":"","make":"","model":"","vin":"","license":"","odometer":0},"apu":{"unit":"","make":"","model":"","vin":"","hours":0,"rental":0}},"operating":{"ytdRevenue":0,"ytdExpenses":0,"ytdNet":0,"weeksInService":0}}}\n\nFor fuel: {"docType":"fuel","date":"","vendor":"","totalAmount":0,"taxDeductible":true,"summary":"","fuel":{"type":"tractor","station":"","location":"","gallons":0,"pricePerGallon":0,"gross":0,"discount":0,"net":0}}\n\nFor maintenance: {"docType":"maintenance","date":"","vendor":"","totalAmount":0,"taxDeductible":true,"summary":"","maintenance":{"invoice":"","shop":"","unit":"","description":"","odometer":0,"serviceType":"oil|fuel|valve|dpf|def|coolext|coolant|trans|tires|brakes|general|other","parts":0,"labor":0,"total":0,"warrantyCredit":0,"netCost":0}}\n\n
+  if(window._bankStmtMode){await importBankStatement(file);return;}if(!file)return;$('dz').style.display='none';$('progbox').style.display='block';$('rprev').style.display='none';const st=$('steps');st.innerHTML='';for(let i=0;i<STEPS.length-1;i++){await new Promise(r=>setTimeout(r,250));st.innerHTML+=`<div class="pstep"><div class="dot ok">✓</div><span>${STEPS[i]}</span></div>`;}st.innerHTML+=`<div class="pstep"><div class="dot sp"></div><span>${STEPS[STEPS.length-1]}</span></div>`;try{const b64=await toB64(file);const isImg=file.type.startsWith('image/');const mt=file.type||'application/pdf';const prompt=`Parse this document for Graywolf Logistics LLC (Ali Bozkurt, Prime Inc. owner-operator, Unit 830157). Return ONLY raw JSON starting with { ending with }. No markdown.\n\ndocType: settlement|fuel|maintenance|amazon|store|toll|loan|other\n\nFor settlement: {"docType":"settlement","date":"YYYY-MM-DD","vendor":"","totalAmount":0,"taxDeductible":true,"bizPct":100,"summary":"","settlement":{"weekEnding":"","carrier":"","unit":"","grossRevenue":0,"reimbursements":0,"totalDeductions":0,"netPay":0,"totalMiles":0,"loadedMiles":0,"revenueItems":[{"desc":"","order":"","amount":0}],"reimbursementItems":[{"desc":"","ref":"","amount":0}],"loads":[{"order":"","from":"","to":"","loadedMiles":0,"emptyMiles":0,"revenue":0,"rate":0,"shipper":""}],"tractorFuel":[{"date":"","location":"","gallons":0,"amount":0,"discount":0}],"reeferFuel":[{"date":"","location":"","gallons":0,"amount":0,"discount":0}],"deductions":[{"code":"","desc":"","balance":0,"amount":0,"category":"Software & Subscriptions|Legal & Accounting Fees|Insurance|Licensing & Permits|Fixed|Variable|Other"}],"maintenance":[{"invoice":"","unit":"","desc":"","odometer":0,"serviceType":"oil|fuel|valve|dpf|def|coolext|coolant|trans|tires|brakes|general|other","parts":0,"labor":0,"total":0,"covered":0}],"tolls":{"ezpass":{"total":0,"items":[]},"drivewyze":{"total":0,"items":[]}},"loans":[{"name":"","balance":0,"payment":0,"frequency":"","nextDue":""}],"assets":{"tractor":{"unit":"","year":"","make":"","model":"","vin":"","license":"","odometer":0},"apu":{"unit":"","make":"","model":"","vin":"","hours":0,"rental":0}},"operating":{"ytdRevenue":0,"ytdExpenses":0,"ytdNet":0,"weeksInService":0}}}\n\nFor fuel: {"docType":"fuel","date":"","vendor":"","totalAmount":0,"taxDeductible":true,"summary":"","fuel":{"type":"tractor","station":"","location":"","gallons":0,"pricePerGallon":0,"gross":0,"discount":0,"net":0}}\n\nFor maintenance: {"docType":"maintenance","date":"","vendor":"","totalAmount":0,"taxDeductible":true,"summary":"","maintenance":{"invoice":"","shop":"","unit":"","description":"","odometer":0,"serviceType":"oil|fuel|valve|dpf|def|coolext|coolant|trans|tires|brakes|general|other","parts":0,"labor":0,"total":0,"warrantyCredit":0,"netCost":0}}\n\n
 For amazon/walmart/homedepot/harborfright/store receipts use docType "amazon" (this is just an internal category name covering ALL store purchases, not literally Amazon):
 {"docType":"amazon","date":"","vendor":"","totalAmount":0,"taxDeductible":true,"bizPct":100,"summary":"","purchase":{"orderNumber":"","items":[{"name":"","qty":1,"price":0}],"subtotal":0,"tax":0,"total":0,"paymentMethod":"BofA Business"}}
 IMPORTANT: "vendor" MUST be the ACTUAL store/company name read from the document (logo, header, footer, or website URL shown) — e.g. "Home Depot", "Walmart", "AutoZone", "Amazon.com". Never default to "Amazon" unless the receipt genuinely is from Amazon. If a photo is blurry and the name truly cannot be read, set vendor to "Unknown Store" rather than guessing a specific brand.
 
 For Zelle/Venmo/Cash App/PayPal payment confirmation screenshots (peer-to-peer payment sent from a PERSONAL account, e.g. "Your payment is sent", a "To:" recipient name, a "Message" field describing what was bought) — ALSO use docType "amazon" with the same schema. Map fields: vendor = the recipient's name (the "To" field), purchase.items[0].name = the "Message" field content (what was purchased) or "Private party purchase" if no message, purchase.total/totalAmount = the "Amount" field, date = the transaction date shown. Set purchase.paymentMethod to whichever app was used: "Zelle Personal", "Venmo Personal", "Cash App Personal", or "PayPal Personal" — this signals the purchase was paid from personal (not business) funds. bizPct should still be 100 if the item is a legitimate business expense (tools, electronics, truck supplies etc per the rule below).
 
-IMPORTANT - Ali Bozkurt is OTR truck driver, sleeper cab is his home+office. ALL items 100% deductible: tools, TV, PlayStation, cooking appliances, electronics, bedding. Only groceries/medicine are personal.\n\nIn settlement deductions, any line item related to bookkeeping, accounting, tax prep, Abacus, or a registered agent/legal filing fee MUST be tagged with category \"Legal & Accounting Fees\" (not left blank or generic) so it can be tracked consistently across weekly settlements.
+IMPORTANT - Ali Bozkurt is OTR truck driver, sleeper cab is his home+office. ALL items 100% deductible: tools, TV, PlayStation, cooking appliances, electronics, bedding. Only groceries/medicine are personal.\n\nIn settlement deductions: any line item related to bookkeeping, accounting, tax prep, Abacus, or a registered agent/legal filing fee MUST be tagged \"Legal & Accounting Fees\"; any ELD, e-log, GPS, maps, load-board, or software service fee MUST be tagged \"Software & Subscriptions\" (not left blank or generic) so it can be tracked consistently across weekly settlements.
 
 `;
     const cb=isImg?{type:'image',source:{type:'base64',media_type:mt,data:b64}}:{type:'document',source:{type:'base64',media_type:'application/pdf',data:b64}};
@@ -2243,6 +2424,7 @@ function guessCategory(name,store){
   const n=(name||'').toLowerCase(),s=(store||'').toLowerCase();
   // Legal, accounting, licensing — check FIRST since these are unambiguous and easy to mis-bucket
   if(/legal|attorney|lawyer|llc filing|llc formation|registered agent|secretary of state|accountant|accounting|bookkeep|abacus|tax prep|cpa\b/.test(n+' '+s))return'Legal & Accounting Fees';
+  if(/anthropic|claude|openai|chatgpt|api credit|github|google workspace|gsuite|dropbox|icloud|microsoft 365|office 365|subscription|saas|software license|trucker path|motive|keeptruckin|samsara|eld\b|garmin|rand mcnally|hammer.?maps?|maps? (subscription|purchase|app)|gps (app|subscription)|dat load|truckstop\.com|load board/.test(n+' '+s))return'Software & Subscriptions';
   if(/insurance|premium|policy/.test(n+' '+s))return'Insurance';
   if(/permit|license|licensing|dot number|mc number|ifta|irp/.test(n+' '+s))return'Licensing & Permits';
   // Tools FIRST — before electronics
@@ -2269,9 +2451,11 @@ function getCatNote(cat){
 async function saveImport(){
   if(guardReadOnly())return;
   if(!PENDING)return;
-  const d=PENDING,dt=d.docType||'other';
+  const d=PENDING;
+  PENDING=null; // claim immediately — a double-click on Save can't process the same doc twice
+  const dt=d.docType||'other';
   const _dupe=checkDuplicateImport(d);
-  if((_dupe.byContent.length||_dupe.byFilename.length)&&!confirm('⚠️ This looks like a duplicate (same date/amount or filename as something already saved).\n\nSave it anyway?'))return;
+  if((_dupe.byContent.length||_dupe.byFilename.length)&&!confirm('⚠️ This looks like a duplicate (same date/amount or filename as something already saved).\n\nSave it anyway?')){PENDING=d;return;}
   if(dt==='settlement'&&d.settlement){
     const s=d.settlement;
     DB.sett.push({id:uid(),date:d.date,weekEnding:s.weekEnding,carrier:s.carrier,gross:s.grossRevenue,reimb:s.reimbursements,ded:s.totalDeductions,net:s.netPay,miles:s.totalMiles,revenueItems:s.revenueItems||[]});
@@ -2279,7 +2463,7 @@ async function saveImport(){
     (s.tractorFuel||[]).forEach(f=>DB.fuel.tr.push({id:uid(),date:f.date||d.date,...f}));
     (s.reeferFuel||[]).forEach(f=>DB.fuel.re.push({id:uid(),date:f.date||d.date,...f}));
     (s.reimbursementItems||[]).forEach(r=>DB.reimb.push({id:uid(),date:d.date,...r}));
-    (s.deductions||[]).forEach(x=>DB.ded.push({id:uid(),date:d.date,...x}));
+    (s.deductions||[]).forEach(x=>DB.ded.push({id:uid(),date:d.date,source:'settlement',payment:'Settlement Withheld',...x}));
     (s.maintenance||[]).forEach(m=>{const type=m.serviceType||detectMaintType(m.desc);const rec={id:uid(),date:d.date,invoice:m.invoice,unit:m.unit,desc:m.desc,parts:m.parts,labor:m.labor,total:m.total,covered:m.covered,odo:m.odometer||0,type};DB.maint.push(rec);applyMaintToHealth(rec);});
     (s.tolls?.ezpass?.items||[]).forEach(t=>DB.tolls.ez.push({id:uid(),...t}));
     (s.tolls?.drivewyze?.items||[]).forEach(t=>DB.tolls.dw.push({id:uid(),...t}));
@@ -2333,13 +2517,13 @@ async function saveImport(){
     const identFallback=(dt==='amazon'||dt==='store')?'unknown-vendor':dt;
     const ident=slugify(d.vendor||d.summary||identFallback);
     const fname=(d.date||'undated')+'_'+dt+'_'+ident+'.'+ext;
-    const cat=orgFolderName(dt,d.vendor);
-    const folderParts=[monthFolder(d.date),cat];
+    const folderParts=buildDocFolderParts(dt,d.date,d.vendor);
     _folderLabel=folderParts.join('/');
     downloadOrganizedFile(d._rawFile,folderParts,fname);
     _saved=autoSaveEnabled();
     if(driveConnected())_drive=await uploadToOrganizedDrive(d._rawFile,folderParts,fname);
   }
+  autoBackupToDrive(); // fire-and-forget: keep a fresh full JSON backup in Drive/Backups
   closePDF();go('dash',document.querySelector('.ni.on'));
   const _nm=dt==='settlement'&&d.settlement?'\n💰 Balance +'+fmt(d.settlement.netPay||0):'';
   const _contribMsg=d._contribTotal>0?'\n💰 Added as a Capital Account contribution: '+fmt(d._contribTotal)+' (paid from personal funds)':'';
@@ -2411,6 +2595,7 @@ Return ONLY JSON.`;
     const _ckFolder=[monthNameToFolder(parsed.month),orgFolderName('checking')];
     downloadOrganizedFile(file,_ckFolder,_ckFname);
     const _ckDrive=driveConnected()?await uploadToOrganizedDrive(file,_ckFolder,_ckFname):false;
+    autoBackupToDrive();
     closePDF();window._checkingMode=false;
     bsTab('checking');rCheckingStmt();
     alert('✅ Checking statement imported!\n'+(parsed.transactions||[]).length+' transactions.'+(_ckDrive?'\n☁️ Uploaded to Google Drive':(autoSaveEnabled()?'\n📁 PDF saved to Bank Statements/ folder':'')));
@@ -2553,6 +2738,16 @@ window.addEventListener('load',()=>{
   try{syncHealthFromMaint(true);}catch(e){console.error('health-sync:',e);}
   try{cleanupOrphanedContributions(true);}catch(e){console.error('contrib-cleanup:',e);}
   try{cleanupStaleDocs(true);}catch(e){console.error('docs-cleanup:',e);}
+  // One-time migration: older imports didn't tag settlement-withheld deductions. Any deduction
+  // whose date matches a settlement AND has no payment/source info is treated as withheld.
+  try{
+    let migrated=0;
+    const settDates=new Set(DB.sett.map(s=>s.date));
+    DB.ded.forEach(x=>{
+      if(!x.source&&!x.payment&&settDates.has(x.date)){x.source='settlement';x.payment='Settlement Withheld';migrated++;}
+    });
+    if(migrated>0){saveDB();console.log('Migrated',migrated,'legacy deductions to settlement-withheld');}
+  }catch(e){console.error('ded-migration:',e);}
   try{initGoogleAuth();}catch(e){console.error('google-auth-init:',e);}
   try{applyReadOnlyBanner();}catch(e){console.error('readonly-banner:',e);}
   const h=JSON.parse(localStorage.getItem('gw_health')||'{}');
