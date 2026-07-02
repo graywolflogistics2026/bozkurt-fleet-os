@@ -1134,6 +1134,23 @@ function buildDocFolderParts(dt,dateStr,vendor){
   }
   return [month,orgFolderName(dt,vendor)];
 }
+// Human-readable filename describing what the document actually is — never internal bucket
+// codes like "amazon". Examples:
+//   2026-06-28_Home-Depot_Milwaukee-M18-Impact-Wrench.pdf
+//   2026-06-27_Payroll-Settlement_Prime-Inc.pdf
+//   2026-05-19_Maintenance_Rush-Truck-Center.pdf
+function buildDocFileName(d,dt,ext){
+  const date=d.date||'undated';
+  if(dt==='amazon'||dt==='store'){
+    const vendor=slugify(d.vendor||'Unknown-Store');
+    const firstItem=d.purchase&&d.purchase.items&&d.purchase.items[0]&&d.purchase.items[0].name;
+    const item=firstItem?slugify(firstItem):'receipt';
+    return date+'_'+vendor+'_'+item+'.'+ext;
+  }
+  const typeLabel={settlement:'Payroll-Settlement',fuel:'Fuel-Receipt',maintenance:'Maintenance-Invoice',toll:'Toll-Statement',loan:'Loan-Document',bankstmt:'Bank-Statement',checking:'Checking-Statement'}[dt]||'Document';
+  const ident=slugify(d.vendor||d.summary||'');
+  return date+'_'+typeLabel+(ident?'_'+ident:'')+'.'+ext;
+}
 function autoSaveEnabled(){return localStorage.getItem('gw_autosave')!=='0';}
 
 // ═══ VIEW-ONLY MODE ═══
@@ -2514,14 +2531,18 @@ async function saveImport(){
   let _saved=false,_drive=false,_folderLabel='';
   if(d._rawFile){
     const ext=(d._rawFile.name.split('.').pop()||'pdf');
-    const identFallback=(dt==='amazon'||dt==='store')?'unknown-vendor':dt;
-    const ident=slugify(d.vendor||d.summary||identFallback);
-    const fname=(d.date||'undated')+'_'+dt+'_'+ident+'.'+ext;
+    const fname=buildDocFileName(d,dt,ext);
     const folderParts=buildDocFolderParts(dt,d.date,d.vendor);
     _folderLabel=folderParts.join('/');
-    downloadOrganizedFile(d._rawFile,folderParts,fname);
-    _saved=autoSaveEnabled();
-    if(driveConnected())_drive=await uploadToOrganizedDrive(d._rawFile,folderParts,fname);
+    // If Drive is connected, it IS the archive — skip the local Save As dialog entirely.
+    // Local organized download only fires as a fallback when Drive isn't connected.
+    if(driveConnected()){
+      _drive=await uploadToOrganizedDrive(d._rawFile,folderParts,fname);
+      if(!_drive){downloadOrganizedFile(d._rawFile,folderParts,fname);_saved=autoSaveEnabled();}
+    }else{
+      downloadOrganizedFile(d._rawFile,folderParts,fname);
+      _saved=autoSaveEnabled();
+    }
   }
   autoBackupToDrive(); // fire-and-forget: keep a fresh full JSON backup in Drive/Backups
   closePDF();go('dash',document.querySelector('.ni.on'));
