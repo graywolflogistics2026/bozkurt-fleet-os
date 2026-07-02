@@ -144,7 +144,7 @@ canvas{max-height:160px;}
     <div class="ni" onclick="go('settings',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M5.64 5.64a10 10 0 0 1 0 13.13"/></svg>Settings</div>
   </div>
   <div class="suser"><div class="sav">AB</div><div class="sui">Ali Bozkurt<small>Graywolf Logistics</small></div></div>
-  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.07.02-A</div>
+  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.07.02-B</div>
 </div>
 <div id="main">
   <div id="readonly-banner" style="display:none;background:var(--org);color:#000;padding:6px 18px;align-items:center;gap:8px;font-size:12px;font-weight:600">👀 View-Only Mode — you're looking, not editing. Ask the owner for changes.</div>
@@ -179,6 +179,13 @@ canvas{max-height:160px;}
         <div class="sc"><div class="sl">Profit / Mile</div><div class="sv" id="d-ppm">—</div><div class="sch">accept loads above CPM!</div></div>
       </div>
 
+      <div class="g4" style="margin-bottom:12px">
+        <div class="sc"><div class="sl">Est. Total Tax (2026)</div><div class="sv tr" id="d-tax-est">$0.00</div><div class="sch">MFJ — SE + Federal</div></div>
+        <div class="sc"><div class="sl">Quarterly Payment</div><div class="sv tr" id="d-tax-qtr">$0.00</div><div class="sch">next due date</div></div>
+        <div class="sc"><div class="sl">Weekly Tax Reserve</div><div class="sv" id="d-tax-wk">$0.00</div><div class="sch" style="color:var(--org)">set aside weekly</div></div>
+        <div class="sc"><div class="sl">Effective Rate</div><div class="sv" id="d-tax-rate">—</div><div class="sch">of net profit</div></div>
+      </div>
+
       <div id="d-capital-strip" onclick="goCapital()" style="cursor:pointer;display:flex;flex-wrap:wrap;gap:14px;align-items:center;background:var(--card);border:1px solid var(--bor);border-radius:10px;padding:9px 14px;margin-bottom:12px;font-size:12px">
         <span style="font-weight:700">💰 Capital Account</span>
         <span style="color:var(--mut)">Contributed: <b id="d-cap-total" style="color:var(--grn)">$60,000</b></span>
@@ -186,13 +193,6 @@ canvas{max-height:160px;}
         <span style="color:var(--mut)">Tax-free left: <b id="d-cap-left" style="color:var(--grn)">$60,000</b></span>
         <span id="d-cap-latest" style="color:var(--mut);font-size:11px"></span>
         <span style="margin-left:auto;color:var(--acc);font-size:11px">details →</span>
-      </div>
-
-      <div class="g4" style="margin-bottom:12px">
-        <div class="sc"><div class="sl">Est. Total Tax (2026)</div><div class="sv tr" id="d-tax-est">$0.00</div><div class="sch">MFJ — SE + Federal</div></div>
-        <div class="sc"><div class="sl">Quarterly Payment</div><div class="sv tr" id="d-tax-qtr">$0.00</div><div class="sch">next due date</div></div>
-        <div class="sc"><div class="sl">Weekly Tax Reserve</div><div class="sv" id="d-tax-wk">$0.00</div><div class="sch" style="color:var(--org)">set aside weekly</div></div>
-        <div class="sc"><div class="sl">Effective Rate</div><div class="sv" id="d-tax-rate">—</div><div class="sch">of net profit</div></div>
       </div>
       <div class="g21">
         <div class="card"><div class="ct">Revenue vs Expenses</div><canvas id="chartMain"></canvas></div>
