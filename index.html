@@ -144,7 +144,7 @@ canvas{max-height:160px;}
     <div class="ni" onclick="go('settings',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M5.64 5.64a10 10 0 0 1 0 13.13"/></svg>Settings</div>
   </div>
   <div class="suser"><div class="sav">AB</div><div class="sui">Ali Bozkurt<small>Graywolf Logistics</small></div></div>
-  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.07.02-B</div>
+  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.07.02-C</div>
 </div>
 <div id="main">
   <div id="readonly-banner" style="display:none;background:var(--org);color:#000;padding:6px 18px;align-items:center;gap:8px;font-size:12px;font-weight:600">👀 View-Only Mode — you're looking, not editing. Ask the owner for changes.</div>
@@ -1815,6 +1815,10 @@ function editDedItem(i){
         <select id="dp-cat" class="fi">${catOptions.map(c=>`<option ${curCat===c?'selected':''}>${c}</option>`).join('')}</select>
       </div>
       <div style="margin-bottom:10px">
+        <div style="font-size:10px;color:var(--mut);margin-bottom:4px">Amount ($)</div>
+        <input id="dp-amt" class="fi" type="number" step="0.01" value="${(x.amount||0).toFixed(2)}">
+      </div>
+      <div style="margin-bottom:10px">
         <div style="font-size:10px;color:var(--mut);margin-bottom:4px">Payment Method</div>
         <select id="dp-pay" class="fi">${PAYMENT_METHODS.map(p=>`<option ${mapLegacyPayment(x.payment)===p?'selected':''}>${p}</option>`).join('')}</select>
       </div>
@@ -1837,6 +1841,8 @@ function saveDedItem(i,btn){
   if(!x)return;
   x.category=document.getElementById('dp-cat').value;
   x.payment=document.getElementById('dp-pay').value;
+  const amt=parseFloat(document.getElementById('dp-amt').value);
+  if(!isNaN(amt)&&amt>=0)x.amount=amt;
   saveDB();
   syncContributionForDeduction(x);
   btn.closest('div[style*=fixed]').remove();
@@ -2406,6 +2412,7 @@ async function handleFile(file){
 For amazon/walmart/homedepot/harborfright/store receipts use docType "amazon" (this is just an internal category name covering ALL store purchases, not literally Amazon):
 {"docType":"amazon","date":"","vendor":"","totalAmount":0,"taxDeductible":true,"bizPct":100,"summary":"","purchase":{"orderNumber":"","items":[{"name":"","qty":1,"price":0}],"subtotal":0,"tax":0,"total":0,"paymentMethod":"BofA Business"}}
 IMPORTANT: "vendor" MUST be the ACTUAL store/company name read from the document (logo, header, footer, or website URL shown) — e.g. "Home Depot", "Walmart", "AutoZone", "Amazon.com". Never default to "Amazon" unless the receipt genuinely is from Amazon. If a photo is blurry and the name truly cannot be read, set vendor to "Unknown Store" rather than guessing a specific brand.
+CRITICAL QUANTITY & TOTALS RULES: "price" is the PER-UNIT price; "qty" is the quantity ordered. Look CAREFULLY for quantity indicators — on Amazon order pages the quantity often appears as a small number next to/below the product image, or as "Qty: N". Extract "tax" (sales tax) into purchase.tax. purchase.total and totalAmount MUST equal the invoice GRAND TOTAL (including tax and shipping). SELF-CHECK before answering: sum(price×qty for all items) + tax + shipping must equal the grand total — if it does not, re-read the document and fix qty or price.
 
 For Zelle/Venmo/Cash App/PayPal payment confirmation screenshots (peer-to-peer payment sent from a PERSONAL account, e.g. "Your payment is sent", a "To:" recipient name, a "Message" field describing what was bought) — ALSO use docType "amazon" with the same schema. Map fields: vendor = the recipient's name (the "To" field), purchase.items[0].name = the "Message" field content (what was purchased) or "Private party purchase" if no message, purchase.total/totalAmount = the "Amount" field, date = the transaction date shown. Set purchase.paymentMethod to whichever app was used: "Zelle Personal", "Venmo Personal", "Cash App Personal", or "PayPal Personal" — this signals the purchase was paid from personal (not business) funds. bizPct should still be 100 if the item is a legitimate business expense (tools, electronics, truck supplies etc per the rule below).
 
@@ -2458,7 +2465,7 @@ function showPrev(d){
   let items=[];
   if(d.docType==='settlement'&&d.settlement){const s=d.settlement;items=[{l:'Gross Revenue',v:s.grossRevenue,c:'var(--grn)'},{l:'Net Pay',v:s.netPay,c:'var(--acc)'},{l:'Deductions',v:s.totalDeductions,c:'var(--red)'},{l:'Miles',t:(s.totalMiles||0).toLocaleString()+' mi'},{l:'Loads',t:(s.loads||[]).length+' loads'},{l:'Tractor Fuel',v:(s.tractorFuel||[]).reduce((a,x)=>a+(x.amount||0),0),c:'var(--red)'},{l:'Reefer Fuel',v:(s.reeferFuel||[]).reduce((a,x)=>a+(x.amount||0),0),c:'var(--red)'},...(s.deductions||[]).slice(0,4).map(x=>({l:x.code+' '+x.desc,v:x.amount,c:'var(--red)'})),];}
   else if(d.docType==='fuel'&&d.fuel){const f=d.fuel;items=[{l:'Type',t:f.type},{l:'Station',t:f.station},{l:'Gallons',t:(f.gallons||0).toFixed(1)+' gal'},{l:'Gross',v:f.gross,c:'var(--red)'},{l:'Discount',v:f.discount,c:'var(--grn)'},{l:'Net',v:f.net,c:'var(--red)'}];}
-  else if(d.docType==='amazon'&&d.purchase){const p=d.purchase;items=(p.items||[]).map(x=>({l:x.name,v:x.price,c:'var(--acc)'}));if(p.tax)items.push({l:'Tax',v:p.tax,c:'var(--red)'});items.push({l:'TOTAL',v:p.total||d.totalAmount,c:'var(--grn)'});if(p.paymentMethod)items.push({l:'Payment Method',t:p.paymentMethod+(isPersonalPayment(p.paymentMethod)?' (→ Capital Contribution)':''),c:isPersonalPayment(p.paymentMethod)?'var(--org)':'var(--mut)'});}
+  else if(d.docType==='amazon'&&d.purchase){const p=d.purchase;items=(p.items||[]).map(x=>{const q=Math.max(1,parseInt(x.qty)||1);return{l:(q>1?q+'× ':'')+x.name+(q>1?' (@'+fmt(x.price||0)+' each)':''),v:(x.price||0)*q,c:'var(--acc)'};});if(p.tax)items.push({l:'Tax',v:p.tax,c:'var(--red)'});items.push({l:'TOTAL',v:p.total||d.totalAmount,c:'var(--grn)'});if(p.paymentMethod)items.push({l:'Payment Method',t:p.paymentMethod+(isPersonalPayment(p.paymentMethod)?' (→ Capital Contribution)':''),c:isPersonalPayment(p.paymentMethod)?'var(--org)':'var(--mut)'});}
   $('p-items').innerHTML=items.filter(x=>x.v||x.t).map(x=>`<div class="ri"><span>${x.l}</span><span style="color:${x.c||'var(--txt)'};font-weight:600">${x.t||(x.v!=null?fmt(x.v):'—')}</span></div>`).join('');
   $('progbox').style.display='none';$('rprev').style.display='block';
 }
@@ -2534,20 +2541,36 @@ async function saveImport(){
     const payMethod=p.paymentMethod||'Business Credit';
     // All store purchases → Deductions (IRS De Minimis rule — under $2,500)
     // Category + short note for accountant
-    let _contribTotal=0;
+    let _contribTotal=0,_itemsSum=0;
     (p.items||[{name:d.summary||'Purchase',price:d.totalAmount,qty:1}]).forEach(item=>{
       const cat=guessCategory(item.name,storeName);
-      const cost=item.price||0;
+      const qty=Math.max(1,parseInt(item.qty)||1);
+      const cost=(item.price||0)*qty; // price is per-unit — multiply by quantity!
       if(cost>0){
         const note=getCatNote(cat);
-        const dedRec={id:uid(),date:d.date,code:'EQUIP',desc:item.name+' — '+note+' | '+storeName+' | '+payMethod+(isPersonalPayment(payMethod)?' — Owner Contribution':''),amount:cost,category:cat,store:storeName,payment:payMethod};
+        const qtyLabel=qty>1?qty+'× ':'';
+        const dedRec={id:uid(),date:d.date,code:'EQUIP',desc:qtyLabel+item.name+' — '+note+' | '+storeName+' | '+payMethod+(isPersonalPayment(payMethod)?' — Owner Contribution':''),amount:cost,category:cat,store:storeName,payment:payMethod};
         DB.ded.push(dedRec);
+        _itemsSum+=cost;
         if(isPersonalPayment(payMethod)){
           syncContributionForDeduction(dedRec);
           _contribTotal+=cost;
         }
       }
     });
+    // Sales tax (and any shipping/fees) is part of the deductible business cost too.
+    // Use the explicit tax field if the AI extracted it; otherwise, if the invoice grand
+    // total exceeds the item sum, book the difference so nothing is silently lost.
+    const grand=p.total||d.totalAmount||0;
+    let extra=p.tax&&p.tax>0?p.tax:(grand>_itemsSum+0.01?+(grand-_itemsSum).toFixed(2):0);
+    if(extra>0.009){
+      const taxRec={id:uid(),date:d.date,code:'EQUIP',desc:'Sales tax & fees | '+storeName+' | '+payMethod+(isPersonalPayment(payMethod)?' — Owner Contribution':''),amount:extra,category:'Misc',store:storeName,payment:payMethod};
+      DB.ded.push(taxRec);
+      if(isPersonalPayment(payMethod)){
+        syncContributionForDeduction(taxRec);
+        _contribTotal+=extra;
+      }
+    }
     d._contribTotal=_contribTotal;
     // Items saved directly to Deductions
   }else{
