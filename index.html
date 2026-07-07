@@ -144,7 +144,7 @@ canvas{max-height:160px;}
     <div class="ni" onclick="go('settings',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M5.64 5.64a10 10 0 0 1 0 13.13"/></svg>Settings</div>
   </div>
   <div class="suser"><div class="sav">AB</div><div class="sui">Ali Bozkurt<small>Graywolf Logistics</small></div></div>
-  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.07.07-D</div>
+  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.07.07-E</div>
 </div>
 <div id="main">
   <div id="readonly-banner" style="display:none;background:var(--org);color:#000;padding:6px 18px;align-items:center;gap:8px;font-size:12px;font-weight:600">👀 View-Only Mode — you're looking, not editing. Ask the owner for changes.</div>
@@ -2613,7 +2613,7 @@ function guessCategory(name,store){
   const n=(name||'').toLowerCase(),s=(store||'').toLowerCase();
   // Legal, accounting, licensing — check FIRST since these are unambiguous and easy to mis-bucket
   if(/legal|attorney|lawyer|llc filing|llc formation|registered agent|secretary of state|accountant|accounting|bookkeep|abacus|tax prep|cpa\b/.test(n+' '+s))return'Legal & Accounting Fees';
-  if(/anthropic|claude|openai|chatgpt|api credit|github|google workspace|gsuite|dropbox|icloud|microsoft 365|office 365|subscription|saas|software license|trucker path|motive|keeptruckin|samsara|eld\b|garmin|rand mcnally|hammer.?maps?|maps? (subscription|purchase|app)|gps (app|subscription)|dat load|truckstop\.com|load board/.test(n+' '+s))return'Software & Subscriptions';
+  if(/anthropic|claude|openai|chatgpt|api credit|github|google workspace|gsuite|dropbox|icloud|microsoft 365|office 365|subscription|saas|software license|trucker path|motive|keeptruckin|samsara|\beld\b|garmin|rand mcnally|hammer.?maps?|maps? (subscription|purchase|app)|gps (app|subscription)|dat load|truckstop\.com|load board/.test(n+' '+s))return'Software & Subscriptions';
   if(/insurance|premium|policy/.test(n+' '+s))return'Insurance';
   if(/permit|license|licensing|dot number|mc number|ifta|irp/.test(n+' '+s))return'Licensing & Permits';
   // Tools FIRST — before electronics
@@ -3062,6 +3062,19 @@ window.addEventListener('load',()=>{
       folded++;
     });
     if(folded>0){saveDB();cleanupOrphanedContributions(true);console.log('Folded',folded,'service rows into parent items');}
+    // Pass 3 (2026-07-07): the old category regex matched "eld" inside words like
+    // "HandhELD", mis-bucketing tools as Software & Subscriptions. Re-guess those.
+    let recat=0;
+    DB.ded.forEach(x=>{
+      if(x.code==='EQUIP'&&x.category==='Software & Subscriptions'){
+        const nm=(x.desc||'').split(' — ')[0];
+        if(!/\beld\b|subscription|software|anthropic|claude|openai|github|dropbox|icloud|microsoft|office 365|motive|samsara|keeptruckin|trucker path|garmin|rand mcnally|dat load|truckstop|load board|saas/i.test(nm)){
+          const g=guessCategory(nm,x.store||'');
+          if(g!=='Software & Subscriptions'){x.category=g;recat++;}
+        }
+      }
+    });
+    if(recat>0){saveDB();console.log('Re-categorized',recat,'mis-bucketed rows');}
   }catch(e){console.error('tax-merge:',e);}
   // One-time migration: older imports didn't tag settlement-withheld deductions. Any deduction
   // whose date matches a settlement AND has no payment/source info is treated as withheld.
