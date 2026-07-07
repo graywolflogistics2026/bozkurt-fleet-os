@@ -144,7 +144,7 @@ canvas{max-height:160px;}
     <div class="ni" onclick="go('settings',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M5.64 5.64a10 10 0 0 1 0 13.13"/></svg>Settings</div>
   </div>
   <div class="suser"><div class="sav">AB</div><div class="sui">Ali Bozkurt<small>Graywolf Logistics</small></div></div>
-  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.07.02-C</div>
+  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.07.06-A</div>
 </div>
 <div id="main">
   <div id="readonly-banner" style="display:none;background:var(--org);color:#000;padding:6px 18px;align-items:center;gap:8px;font-size:12px;font-weight:600">👀 View-Only Mode — you're looking, not editing. Ask the owner for changes.</div>
@@ -194,6 +194,7 @@ canvas{max-height:160px;}
         <span id="d-cap-latest" style="color:var(--mut);font-size:11px"></span>
         <span style="margin-left:auto;color:var(--acc);font-size:11px">details →</span>
       </div>
+      <div id="d-warranty-alert" style="display:none;background:rgba(245,158,11,.08);border:1px solid var(--org);border-radius:10px;padding:9px 14px;margin-bottom:12px;font-size:12px"></div>
       <div class="g21">
         <div class="card"><div class="ct">Revenue vs Expenses</div><canvas id="chartMain"></canvas></div>
         <div class="card"><div class="ct">Last Settlement</div><div id="d-lastsett"><div class="empty">Import PDF</div></div></div>
@@ -1359,6 +1360,20 @@ function rDash(){
   if($('d-weeks'))$('d-weeks').textContent=DB.sett.length;
   const avgNet=DB.sett.length?net/DB.sett.length:0;
   if($('d-avgnet'))$('d-avgnet').textContent=fmt(avgNet);
+  // Warranty expiration alerts: items expiring within 60 days (orange) or expired (red)
+  const wAlert=$('d-warranty-alert');
+  if(wAlert){
+    const alerts=DB.ded.filter(x=>x.code==='EQUIP'&&x.warrantyYears).map(x=>({x,w:warrantyStatus(x)})).filter(a=>a.w&&(a.w.cls==='soon'||(a.w.cls==='expired'&&a.w.days>=-30)));
+    if(alerts.length){
+      wAlert.style.display='block';
+      wAlert.innerHTML='<b style="color:var(--org)">🛡️ Warranty Alerts</b> '+alerts.map(a=>{
+        const name=(a.x.desc||'').split(' — ')[0].slice(0,40);
+        const col=a.w.cls==='expired'?'var(--red)':'var(--org)';
+        const label=a.w.cls==='expired'?'EXPIRED '+a.w.end:a.w.days+' days left ('+a.w.end+')';
+        return'<span style="margin-left:12px;color:'+col+'">'+name+': <b>'+label+'</b></span>';
+      }).join('');
+    }else{wAlert.style.display='none';}
+  }
   // Cost-per-mile: THE owner-operator metric. Total cost = everything withheld from
   // settlements + everything paid out-of-pocket. Revenue = gross. Miles = settlement miles.
   const totalMiles=DB.sett.reduce((a,x)=>a+(x.miles||0),0);
@@ -1875,6 +1890,23 @@ function saveManualDed(){
   rDed();rDash();
   alert('✅ Deduction saved!'+(isPersonalPayment(payment)?'\n💰 Added as a Capital Account contribution of '+fmt(amt)+'.':''));
 }
+// Warranty status for an item: expiry date = purchase date + warrantyYears.
+// Returns null if no warranty set, else {end:'YYYY-MM-DD', days:int, cls:'ok'|'soon'|'expired'}
+function warrantyStatus(x){
+  if(!x||!x.warrantyYears||!x.date)return null;
+  const end=new Date(x.date+'T00:00:00');
+  end.setMonth(end.getMonth()+Math.round(x.warrantyYears*12));
+  const today=new Date();today.setHours(0,0,0,0);
+  const days=Math.ceil((end-today)/86400000);
+  return{end:end.toISOString().slice(0,10),days,cls:days<0?'expired':days<=60?'soon':'ok'};
+}
+function warrantyCellHtml(x){
+  const w=warrantyStatus(x);
+  if(!w)return'<span style="color:var(--mut);font-size:10px">\u2014</span>';
+  const col=w.cls==='expired'?'var(--red)':w.cls==='soon'?'var(--org)':'var(--grn)';
+  const label=w.cls==='expired'?'Expired '+w.end:(w.days+'d left \u00b7 '+w.end);
+  return'<span style="color:'+col+';font-size:10px;font-weight:600">\ud83d\udee1\ufe0f '+x.warrantyYears+'y \u2014 '+label+'</span>';
+}
 function rAssets(){const t=DB.assets.tr;$('a-tr').innerHTML=t?`<table><tbody><tr><td class="tm">Unit #</td><td>${t.unit||'—'}</td></tr><tr><td class="tm">Year/Make/Model</td><td>${t.year||''} ${t.make||''} ${t.model||''}</td></tr><tr><td class="tm">VIN</td><td>${t.vin||'—'}</td></tr><tr><td class="tm">Odometer</td><td>${(t.odometer||0).toLocaleString()} mi</td></tr></tbody></table>`:'<div class="empty">Import PDF</div>';}
 function rOper(){const rev=DB.op.ytdRevenue||DB.sett.reduce((a,x)=>a+(x.gross||0),0);const exp=DB.op.ytdExpenses||DB.ded.reduce((a,x)=>a+(x.amount||0),0);const net=DB.op.ytdNet||(rev-exp);$('op-rev').textContent=fmt(rev);$('op-exp').textContent=fmt(exp);$('op-net').textContent=fmt(net);$('op-net').style.color=net>=0?'var(--grn)':'var(--red)';const rc={};DB.sett.flatMap(x=>x.revenueItems||[]).forEach(x=>{rc[x.desc]=(rc[x.desc]||0)+(x.amount||0);});$('op-revd').innerHTML=Object.entries(rc).length?Object.entries(rc).map(([k,v])=>`<div class="osr"><span>${k}</span><span class="tg">${fmt(v)}</span></div>`).join('')+`<div class="osr tot"><span>Total</span><span class="tg">${fmt(rev)}</span></div>`:'<div class="empty">Import PDF</div>';const ec={};DB.ded.forEach(x=>{const c=x.category||x.code||'Other';ec[c]=(ec[c]||0)+(x.amount||0);});$('op-expd').innerHTML=Object.entries(ec).length?Object.entries(ec).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<div class="osr"><span>${k}</span><span class="tr">${fmt(v)}</span></div>`).join('')+`<div class="osr tot"><span>TOTAL</span><span class="tr">${fmt(exp)}</span></div><div class="osr tot" style="font-size:13px"><span>NET INCOME</span><span style="color:${net>=0?'var(--grn)':'var(--red)'}">${fmt(net)}</span></div>`:'<div class="empty">Import PDF</div>';}
 // International A26 spec-card intervals — MPG-tiered oil/fuel-filter/DPF, fixed DEF/coolant, staged valve lash.
@@ -2015,7 +2047,7 @@ function rAreg(){
     $('ar-tbl').innerHTML='<div class="empty">No items'+(arActiveFilter!=='all'?' in '+arActiveFilter:'')+'. Add manually below or import a store receipt PDF.</div>';
     return;
   }
-  $('ar-tbl').innerHTML='<table><thead><tr><th>Item</th><th>Category</th><th>Store</th><th>Payment</th><th>Date</th><th>Amount</th><th></th></tr></thead><tbody>'+filtered.map(x=>{
+  $('ar-tbl').innerHTML='<table><thead><tr><th>Item</th><th>Category</th><th>Store</th><th>Payment</th><th>Date</th><th>Amount</th><th>Warranty</th><th></th></tr></thead><tbody>'+filtered.map(x=>{
     const realIdx=DB.ded.indexOf(x);
     const parts=(x.desc||'').split(' — ');
     const itemName=parts[0]||'—';
@@ -2027,6 +2059,7 @@ function rAreg(){
       <td style="font-size:10px;color:${payColor}">${x.payment||'BofA'}</td>
       <td class="tm" style="font-size:10px">${x.date||'—'}</td>
       <td class="tg">${fmt(x.amount)}</td>
+      <td>${warrantyCellHtml(x)}</td>
       <td style="display:flex;gap:3px">
         <button onclick="editEquipItem(${realIdx})" style="background:none;border:1px solid var(--acc);color:var(--acc);padding:1px 6px;border-radius:4px;font-size:10px;cursor:pointer">✏️</button>
         <button onclick="deleteEquipItem(${realIdx})" style="background:none;border:1px solid var(--red);color:var(--red);padding:1px 6px;border-radius:4px;font-size:10px;cursor:pointer">✕</button>
@@ -2095,6 +2128,8 @@ function editEquipItem(i){
           <input id="ei-date" type="date" class="fi" value="${x.date||''}"></div>
         <div><div style="font-size:10px;color:var(--mut);margin-bottom:4px">Amount ($)</div>
           <input id="ei-amt" type="number" class="fi" value="${x.amount||0}"></div>
+        <div><div style="font-size:10px;color:var(--mut);margin-bottom:4px">Warranty (years — blank if none)</div>
+          <input id="ei-war" type="number" step="0.5" min="0" class="fi" value="${x.warrantyYears||''}" placeholder="e.g. 3"></div>
       </div>
       <div style="display:flex;gap:8px;justify-content:flex-end">
         <button onclick="this.closest('div[style*=fixed]').remove()" style="background:var(--card2);border:1px solid var(--bor);color:var(--txt);padding:8px 14px;border-radius:7px;font-size:12px;cursor:pointer">Cancel</button>
@@ -2114,6 +2149,8 @@ function saveEquipEdit(i,btn){
   const pay=document.getElementById('ei-pay').value;
   const date=document.getElementById('ei-date').value;
   const amt=parseFloat(document.getElementById('ei-amt').value)||0;
+  const war=parseFloat(document.getElementById('ei-war').value);
+  x.warrantyYears=(!isNaN(war)&&war>0)?war:null;
   const note=getCatNote(cat);
   x.desc=name+' — '+note+' | '+store+(isPersonalPayment(pay)?' | '+pay+' — Owner Contribution':'');
   x.category=cat;
@@ -2465,7 +2502,7 @@ function showPrev(d){
   let items=[];
   if(d.docType==='settlement'&&d.settlement){const s=d.settlement;items=[{l:'Gross Revenue',v:s.grossRevenue,c:'var(--grn)'},{l:'Net Pay',v:s.netPay,c:'var(--acc)'},{l:'Deductions',v:s.totalDeductions,c:'var(--red)'},{l:'Miles',t:(s.totalMiles||0).toLocaleString()+' mi'},{l:'Loads',t:(s.loads||[]).length+' loads'},{l:'Tractor Fuel',v:(s.tractorFuel||[]).reduce((a,x)=>a+(x.amount||0),0),c:'var(--red)'},{l:'Reefer Fuel',v:(s.reeferFuel||[]).reduce((a,x)=>a+(x.amount||0),0),c:'var(--red)'},...(s.deductions||[]).slice(0,4).map(x=>({l:x.code+' '+x.desc,v:x.amount,c:'var(--red)'})),];}
   else if(d.docType==='fuel'&&d.fuel){const f=d.fuel;items=[{l:'Type',t:f.type},{l:'Station',t:f.station},{l:'Gallons',t:(f.gallons||0).toFixed(1)+' gal'},{l:'Gross',v:f.gross,c:'var(--red)'},{l:'Discount',v:f.discount,c:'var(--grn)'},{l:'Net',v:f.net,c:'var(--red)'}];}
-  else if(d.docType==='amazon'&&d.purchase){const p=d.purchase;items=(p.items||[]).map(x=>{const q=Math.max(1,parseInt(x.qty)||1);return{l:(q>1?q+'× ':'')+x.name+(q>1?' (@'+fmt(x.price||0)+' each)':''),v:(x.price||0)*q,c:'var(--acc)'};});if(p.tax)items.push({l:'Tax',v:p.tax,c:'var(--red)'});items.push({l:'TOTAL',v:p.total||d.totalAmount,c:'var(--grn)'});if(p.paymentMethod)items.push({l:'Payment Method',t:p.paymentMethod+(isPersonalPayment(p.paymentMethod)?' (→ Capital Contribution)':''),c:isPersonalPayment(p.paymentMethod)?'var(--org)':'var(--mut)'});}
+  else if(d.docType==='amazon'&&d.purchase){const p=d.purchase;items=(p.items||[]).map(x=>{const q=Math.max(1,parseInt(x.qty)||1);return{l:(q>1?q+'× ':'')+x.name+(q>1?' (@'+fmt(x.price||0)+' each)':''),v:(x.price||0)*q,c:'var(--acc)'};});if(p.tax)items.push({l:'Tax & fees (distributed into item costs)',v:p.tax,c:'var(--mut)'});items.push({l:'TOTAL',v:p.total||d.totalAmount,c:'var(--grn)'});if(p.paymentMethod)items.push({l:'Payment Method',t:p.paymentMethod+(isPersonalPayment(p.paymentMethod)?' (→ Capital Contribution)':''),c:isPersonalPayment(p.paymentMethod)?'var(--org)':'var(--mut)'});}
   $('p-items').innerHTML=items.filter(x=>x.v||x.t).map(x=>`<div class="ri"><span>${x.l}</span><span style="color:${x.c||'var(--txt)'};font-weight:600">${x.t||(x.v!=null?fmt(x.v):'—')}</span></div>`).join('');
   $('progbox').style.display='none';$('rprev').style.display='block';
 }
@@ -2540,37 +2577,40 @@ async function saveImport(){
     const storeName=d.vendor||dt;
     const payMethod=p.paymentMethod||'Business Credit';
     // All store purchases → Deductions (IRS De Minimis rule — under $2,500)
-    // Category + short note for accountant
-    let _contribTotal=0,_itemsSum=0;
-    (p.items||[{name:d.summary||'Purchase',price:d.totalAmount,qty:1}]).forEach(item=>{
-      const cat=guessCategory(item.name,storeName);
-      const qty=Math.max(1,parseInt(item.qty)||1);
-      const cost=(item.price||0)*qty; // price is per-unit — multiply by quantity!
-      if(cost>0){
-        const note=getCatNote(cat);
-        const qtyLabel=qty>1?qty+'× ':'';
-        const dedRec={id:uid(),date:d.date,code:'EQUIP',desc:qtyLabel+item.name+' — '+note+' | '+storeName+' | '+payMethod+(isPersonalPayment(payMethod)?' — Owner Contribution':''),amount:cost,category:cat,store:storeName,payment:payMethod};
-        DB.ded.push(dedRec);
-        _itemsSum+=cost;
-        if(isPersonalPayment(payMethod)){
-          syncContributionForDeduction(dedRec);
-          _contribTotal+=cost;
-        }
+    // OWNER DECISION 2026-07-06: sales tax & fees are NOT separate rows anymore —
+    // they are distributed proportionally INTO each item's cost. The booked total
+    // still equals the receipt's grand total to the cent (remainder cents go to
+    // the largest item). One receipt line = one asset row, tax included.
+    const rawItems=(p.items||[{name:d.summary||'Purchase',price:d.totalAmount,qty:1}])
+      .map(item=>{const qty=Math.max(1,parseInt(item.qty)||1);return{name:item.name||'Item',qty,cost:+(((item.price||0)*qty).toFixed(2))};})
+      .filter(x=>x.cost>0);
+    const itemsSum=+(rawItems.reduce((a,x)=>a+x.cost,0).toFixed(2));
+    const grand=p.total||d.totalAmount||0;
+    const extra=p.tax&&p.tax>0?+(+p.tax).toFixed(2):(grand>itemsSum+0.01?+((grand-itemsSum).toFixed(2)):0);
+    let allocated=0;
+    rawItems.forEach(x=>{
+      x.taxShare=itemsSum>0?+((extra*(x.cost/itemsSum)).toFixed(2)):0;
+      allocated=+((allocated+x.taxShare).toFixed(2));
+    });
+    const remainder=+((extra-allocated).toFixed(2));
+    if(Math.abs(remainder)>=0.01&&rawItems.length){
+      const biggest=rawItems.reduce((a,b)=>a.cost>=b.cost?a:b);
+      biggest.taxShare=+((biggest.taxShare+remainder).toFixed(2));
+    }
+    let _contribTotal=0;
+    rawItems.forEach(x=>{
+      const totalCost=+((x.cost+(x.taxShare||0)).toFixed(2));
+      const cat=guessCategory(x.name,storeName);
+      const note=getCatNote(cat);
+      const qtyLabel=x.qty>1?x.qty+'× ':'';
+      const taxNote=(x.taxShare||0)>0?' (incl. '+fmt(x.taxShare)+' tax/fees)':'';
+      const dedRec={id:uid(),date:d.date,code:'EQUIP',desc:qtyLabel+x.name+' — '+note+taxNote+' | '+storeName+' | '+payMethod+(isPersonalPayment(payMethod)?' — Owner Contribution':''),amount:totalCost,category:cat,store:storeName,payment:payMethod};
+      DB.ded.push(dedRec);
+      if(isPersonalPayment(payMethod)){
+        syncContributionForDeduction(dedRec);
+        _contribTotal+=totalCost;
       }
     });
-    // Sales tax (and any shipping/fees) is part of the deductible business cost too.
-    // Use the explicit tax field if the AI extracted it; otherwise, if the invoice grand
-    // total exceeds the item sum, book the difference so nothing is silently lost.
-    const grand=p.total||d.totalAmount||0;
-    let extra=p.tax&&p.tax>0?p.tax:(grand>_itemsSum+0.01?+(grand-_itemsSum).toFixed(2):0);
-    if(extra>0.009){
-      const taxRec={id:uid(),date:d.date,code:'EQUIP',desc:'Sales tax & fees | '+storeName+' | '+payMethod+(isPersonalPayment(payMethod)?' — Owner Contribution':''),amount:extra,category:'Misc',store:storeName,payment:payMethod};
-      DB.ded.push(taxRec);
-      if(isPersonalPayment(payMethod)){
-        syncContributionForDeduction(taxRec);
-        _contribTotal+=extra;
-      }
-    }
     d._contribTotal=_contribTotal;
     // Items saved directly to Deductions
   }else{
@@ -2809,6 +2849,32 @@ window.addEventListener('load',()=>{
   try{syncHealthFromMaint(true);}catch(e){console.error('health-sync:',e);}
   try{cleanupOrphanedContributions(true);}catch(e){console.error('contrib-cleanup:',e);}
   try{cleanupStaleDocs(true);}catch(e){console.error('docs-cleanup:',e);}
+  // One-time migration (2026-07-06): merge legacy separate "Sales tax & fees" rows
+  // into their sibling item rows (same store + same date), distributed proportionally.
+  // Idempotent: once merged, no tax rows remain to match.
+  try{
+    const taxRows=DB.ded.filter(x=>/^Sales tax & fees/i.test(x.desc||''));
+    let merged=0;
+    taxRows.forEach(tr=>{
+      const siblings=DB.ded.filter(x=>x!==tr&&x.code==='EQUIP'&&x.store===tr.store&&x.date===tr.date&&!/^Sales tax & fees/i.test(x.desc||''));
+      if(!siblings.length)return; // orphan tax row — leave it, user can handle manually
+      const sum=siblings.reduce((a,x)=>a+(x.amount||0),0);
+      if(sum<=0)return;
+      let allocated=0;
+      siblings.forEach((x,i)=>{
+        let share=+(((tr.amount||0)*(x.amount/sum)).toFixed(2));
+        if(i===siblings.length-1)share=+(((tr.amount||0)-allocated).toFixed(2)); // remainder to last
+        allocated=+((allocated+share).toFixed(2));
+        x.amount=+((x.amount+share).toFixed(2));
+        if(!/incl\..*tax\/fees/.test(x.desc||''))x.desc=(x.desc||'').replace(/( \| )/,' (incl. '+fmt(share)+' tax/fees)$1');
+        syncContributionForDeduction(x);
+      });
+      const idx=DB.ded.indexOf(tr);
+      if(idx>-1)DB.ded.splice(idx,1);
+      merged++;
+    });
+    if(merged>0){saveDB();cleanupOrphanedContributions(true);console.log('Merged',merged,'tax rows into item costs');}
+  }catch(e){console.error('tax-merge:',e);}
   // One-time migration: older imports didn't tag settlement-withheld deductions. Any deduction
   // whose date matches a settlement AND has no payment/source info is treated as withheld.
   try{
