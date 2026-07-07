@@ -144,7 +144,7 @@ canvas{max-height:160px;}
     <div class="ni" onclick="go('settings',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M5.64 5.64a10 10 0 0 1 0 13.13"/></svg>Settings</div>
   </div>
   <div class="suser"><div class="sav">AB</div><div class="sui">Ali Bozkurt<small>Graywolf Logistics</small></div></div>
-  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.07.06-H</div>
+  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.07.06-I</div>
 </div>
 <div id="main">
   <div id="readonly-banner" style="display:none;background:var(--org);color:#000;padding:6px 18px;align-items:center;gap:8px;font-size:12px;font-weight:600">👀 View-Only Mode — you're looking, not editing. Ask the owner for changes.</div>
@@ -2555,7 +2555,7 @@ function showPrev(d){
   let items=[];
   if(d.docType==='settlement'&&d.settlement){const s=d.settlement;items=[{l:'Gross Revenue',v:s.grossRevenue,c:'var(--grn)'},{l:'Net Pay',v:s.netPay,c:'var(--acc)'},{l:'Deductions',v:s.totalDeductions,c:'var(--red)'},{l:'Miles',t:(s.totalMiles||0).toLocaleString()+' mi'},{l:'Loads',t:(s.loads||[]).length+' loads'},{l:'Tractor Fuel',v:(s.tractorFuel||[]).reduce((a,x)=>a+(x.amount||0),0),c:'var(--red)'},{l:'Reefer Fuel',v:(s.reeferFuel||[]).reduce((a,x)=>a+(x.amount||0),0),c:'var(--red)'},...(s.deductions||[]).slice(0,4).map(x=>({l:x.code+' '+x.desc,v:x.amount,c:'var(--red)'})),];}
   else if(d.docType==='fuel'&&d.fuel){const f=d.fuel;items=[{l:'Type',t:f.type},{l:'Station',t:f.station},{l:'Gallons',t:(f.gallons||0).toFixed(1)+' gal'},{l:'Gross',v:f.gross,c:'var(--red)'},{l:'Discount',v:f.discount,c:'var(--grn)'},{l:'Net',v:f.net,c:'var(--red)'}];}
-  else if(d.docType==='amazon'&&d.purchase){const p=d.purchase;items=(p.items||[]).map(x=>{const q=Math.max(1,parseInt(x.qty)||1);const vague=VAGUE_ITEM_RE.test((x.name||'').trim());const nm=vague?(x.name||'').trim()+' → folded into item costs':(x.name||'').trim();return{l:(q>1?q+'× ':'')+nm+(q>1&&!vague?' (@'+fmt(x.price||0)+' each)':''),v:(x.price||0)*q,c:vague?'var(--mut)':'var(--acc)'};});if(p.tax)items.push({l:'Tax & fees (distributed into item costs)',v:p.tax,c:'var(--mut)'});items.push({l:'TOTAL',v:p.total||d.totalAmount,c:'var(--grn)'});if(p.paymentMethod)items.push({l:'Payment Method',paySel:true,t:p.paymentMethod});}
+  else if(d.docType==='amazon'&&d.purchase){const p=d.purchase;items=(p.items||[]).map(x=>{const q=Math.max(1,parseInt(x.qty)||1);const vague=isFoldableServiceLine(x.name);const nm=vague?(x.name||'').trim()+' → folded into item costs':(x.name||'').trim();return{l:(q>1?q+'× ':'')+nm+(q>1&&!vague?' (@'+fmt(x.price||0)+' each)':''),v:(x.price||0)*q,c:vague?'var(--mut)':'var(--acc)'};});if(p.tax)items.push({l:'Tax & fees (distributed into item costs)',v:p.tax,c:'var(--mut)'});items.push({l:'TOTAL',v:p.total||d.totalAmount,c:'var(--grn)'});if(p.paymentMethod)items.push({l:'Payment Method',paySel:true,t:p.paymentMethod});}
   $('p-items').innerHTML=items.filter(x=>x.v||x.t).map(x=>{
     if(x.paySel){
       const cur=mapLegacyPayment(x.t);
@@ -2600,6 +2600,14 @@ function getCatNote(cat){
 // Client-side safety net: vague receipt line names get flagged for review no
 // matter what the AI returned — an accountant must never see "Add-on services".
 const VAGUE_ITEM_RE=/^(add.?ons?|add.?on services?|services?|service fees?|misc(ellaneous)?|items?|fees?|charges?|other)$/i;
+// Foldable service lines: vague names AND any protection/warranty/service-plan
+// line by ANY name (owner decision 2026-07-06: these never stand alone — their
+// cost folds into the real items so the whole receipt is deducted cleanly).
+function isFoldableServiceLine(name){
+  const n=(name||'').trim();
+  if(VAGUE_ITEM_RE.test(n))return true;
+  return /(protection|warranty|service|care|coverage)\s*plan|extended warranty|allstate|asurion|squaretrade|applecare|walmart protection/i.test(n);
+}
 function flagVagueName(name){
   const n=(name||'').trim();
   if(!n)return 'NEEDS REVIEW: unnamed line';
@@ -2664,9 +2672,10 @@ async function saveImport(){
     // usually protection/warranty services) don't become their own rows — their cost is
     // folded into the tax/fees pot and distributed into the REAL items proportionally.
     // The receipt's grand total is still booked to the cent; nothing is lost.
-    let rawItems=allItems.filter(x=>!VAGUE_ITEM_RE.test(x.name));
-    let foldSum=+(allItems.filter(x=>VAGUE_ITEM_RE.test(x.name)).reduce((a,x)=>a+x.cost,0).toFixed(2));
-    if(!rawItems.length){rawItems=allItems.map(x=>({...x,name:flagVagueName(x.name)}));foldSum=0;} // whole receipt vague — keep flagged
+    let rawItems=allItems.filter(x=>!isFoldableServiceLine(x.name));
+    const foldedPlans=allItems.filter(x=>isFoldableServiceLine(x.name));
+    let foldSum=+(foldedPlans.reduce((a,x)=>a+x.cost,0).toFixed(2));
+    if(!rawItems.length){rawItems=allItems.map(x=>({...x,name:flagVagueName(x.name)}));foldSum=0;} // whole receipt is service lines — keep, flagged // whole receipt vague — keep flagged
     const allSum=+(allItems.reduce((a,x)=>a+x.cost,0).toFixed(2));
     const itemsSum=+(rawItems.reduce((a,x)=>a+x.cost,0).toFixed(2));
     const grand=p.total||d.totalAmount||0;
@@ -2700,12 +2709,14 @@ async function saveImport(){
         _contribTotal+=totalCost;
       }
     });
-    // Protection-plan linking: a purchased warranty line ("warrantyFor") stamps its
-    // duration onto the covered item's row, so the Asset Register + Dashboard alerts
-    // track the REAL covered product — not just the plan line itself.
-    rawItems.forEach(x=>{
-      if(!x.warrantyFor||!x.warrantyYears)return;
-      const target=rawItems.find(y=>y!==x&&y.name.toLowerCase().includes(String(x.warrantyFor).toLowerCase().slice(0,20)));
+    // Warranty stamping: folded protection plans (and any item with warrantyFor)
+    // pass their duration onto the covered item's saved row — the plan line itself
+    // is gone, but the coverage lives on the real product.
+    rawItems.concat(foldedPlans).forEach(x=>{
+      if(!x.warrantyYears)return;
+      let target=null;
+      if(x.warrantyFor)target=rawItems.find(y=>y!==x&&y.name.toLowerCase().includes(String(x.warrantyFor).toLowerCase().slice(0,20)));
+      if(!target&&isFoldableServiceLine(x.name)&&rawItems.length===1)target=rawItems[0]; // single-item receipt: plan covers it
       if(target&&target._dedRef&&!target._dedRef.warrantyYears){target._dedRef.warrantyYears=x.warrantyYears;}
     });
     d._contribTotal=_contribTotal;
