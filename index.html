@@ -144,7 +144,7 @@ canvas{max-height:160px;}
     <div class="ni" onclick="go('settings',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M5.64 5.64a10 10 0 0 1 0 13.13"/></svg>Settings</div>
   </div>
   <div class="suser"><div class="sav">AB</div><div class="sui">Ali Bozkurt<small>Graywolf Logistics</small></div></div>
-  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.07.07-G</div>
+  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.07.07-H</div>
 </div>
 <div id="main">
   <div id="readonly-banner" style="display:none;background:var(--org);color:#000;padding:6px 18px;align-items:center;gap:8px;font-size:12px;font-weight:600">👀 View-Only Mode — you're looking, not editing. Ask the owner for changes.</div>
@@ -2310,7 +2310,7 @@ function rSettings(){
   if($('autosave-toggle'))$('autosave-toggle').checked=autoSaveEnabled();
   if($('drive-status')){
     $('drive-status').innerHTML=driveConnected()
-      ?'<span style="color:var(--grn);font-weight:600">✅ Connected — uploading to graywolflogistics2026 documents/ in your Drive</span> <button class="btn" style="margin-left:10px;font-size:11px" onclick="cleanDriveDuplicates(this)">🧹 Clean Drive Duplicates</button>'
+      ?'<span style="color:var(--grn);font-weight:600">✅ Connected — uploading to graywolflogistics2026 documents/ in your Drive</span> <button class="btn" style="margin-left:10px;font-size:11px" onclick="cleanDriveDuplicates(this)">🧹 Clean Drive Duplicates</button> <button class="btn" style="margin-left:6px;font-size:11px;border-color:var(--red);color:var(--red)" onclick="wipeDriveDocsBtn(this)">🗑️ Wipe Drive Documents</button>'
       :'<span style="color:var(--mut)">⚪ Not connected</span>';
   }
   if($('readonly-status')){
@@ -2372,6 +2372,20 @@ async function driveWipeDocuments(){
     }
   }
   return trashed;
+}
+// Settings button: wipe ALL files in the Drive documents tree (folders kept,
+// Trash-recoverable 30 days). Runs from a direct click so Google's auth popup
+// is not blocked by the browser.
+async function wipeDriveDocsBtn(btn){
+  if(!driveConnected()){alert('Connect Google Drive first.');return;}
+  if(!confirm('🗑️ Move ALL files in "graywolflogistics2026 documents" to Drive Trash?\n\nFolders stay. Files recoverable from Trash for 30 days.'))return;
+  if(btn){btn.disabled=true;btn.textContent='Wiping…';}
+  try{
+    const n=await driveWipeDocuments();
+    alert('🧹 Done — '+n+' file(s) moved to Drive Trash.');
+  }catch(e){
+    alert('Failed: '+e.message+'\n\nIf a popup was blocked: click the blocked-popup icon at the right end of the address bar → "Always allow pop-ups from this site" → try again.');
+  }finally{if(btn){btn.disabled=false;btn.textContent='🗑️ Wipe Drive Documents';}}
 }
 async function cleanDriveDuplicates(btn){
   if(!driveConnected()){alert('Connect Google Drive first (Settings).');return;}
