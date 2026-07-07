@@ -144,7 +144,7 @@ canvas{max-height:160px;}
     <div class="ni" onclick="go('settings',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M5.64 5.64a10 10 0 0 1 0 13.13"/></svg>Settings</div>
   </div>
   <div class="suser"><div class="sav">AB</div><div class="sui">Ali Bozkurt<small>Graywolf Logistics</small></div></div>
-  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.07.06-J</div>
+  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.07.07-C</div>
 </div>
 <div id="main">
   <div id="readonly-banner" style="display:none;background:var(--org);color:#000;padding:6px 18px;align-items:center;gap:8px;font-size:12px;font-weight:600">👀 View-Only Mode — you're looking, not editing. Ask the owner for changes.</div>
@@ -403,6 +403,7 @@ canvas{max-height:160px;}
         <div class="sc"><div class="sl">Net Income</div><div class="sv" id="op-net">$0.00</div></div>
       </div>
       <div class="g2">
+        <div id="op-prime-ytd" style="display:none;background:rgba(79,124,255,.08);border:1px solid var(--acc);border-radius:9px;padding:10px 14px;margin-bottom:12px;font-size:12px;grid-column:1/-1"></div>
         <div class="card"><div class="ct">Revenue Detail</div><div id="op-revd"><div class="empty">Import PDF</div></div></div>
         <div class="card"><div class="ct">Expense Detail</div><div id="op-expd"><div class="empty">Import PDF</div></div></div>
       </div>
@@ -1939,7 +1940,20 @@ function warrantyCellHtml(x){
   return'<span style="color:'+col+';font-size:10px;font-weight:600">\ud83d\udee1\ufe0f '+x.warrantyYears+'y \u2014 '+label+'</span>';
 }
 function rAssets(){const t=DB.assets.tr;$('a-tr').innerHTML=t?`<table><tbody><tr><td class="tm">Unit #</td><td>${t.unit||'—'}</td></tr><tr><td class="tm">Year/Make/Model</td><td>${t.year||''} ${t.make||''} ${t.model||''}</td></tr><tr><td class="tm">VIN</td><td>${t.vin||'—'}</td></tr><tr><td class="tm">Odometer</td><td>${(t.odometer||0).toLocaleString()} mi</td></tr></tbody></table>`:'<div class="empty">Import PDF</div>';}
-function rOper(){const rev=DB.op.ytdRevenue||DB.sett.reduce((a,x)=>a+(x.gross||0),0);const exp=DB.op.ytdExpenses||DB.ded.reduce((a,x)=>a+(x.amount||0),0);const net=DB.op.ytdNet||(rev-exp);$('op-rev').textContent=fmt(rev);$('op-exp').textContent=fmt(exp);$('op-net').textContent=fmt(net);$('op-net').style.color=net>=0?'var(--grn)':'var(--red)';const rc={};DB.sett.flatMap(x=>x.revenueItems||[]).forEach(x=>{rc[x.desc]=(rc[x.desc]||0)+(x.amount||0);});$('op-revd').innerHTML=Object.entries(rc).length?Object.entries(rc).map(([k,v])=>`<div class="osr"><span>${k}</span><span class="tg">${fmt(v)}</span></div>`).join('')+`<div class="osr tot"><span>Total</span><span class="tg">${fmt(rev)}</span></div>`:'<div class="empty">Import PDF</div>';const ec={};DB.ded.forEach(x=>{const c=x.category||x.code||'Other';ec[c]=(ec[c]||0)+(x.amount||0);});$('op-expd').innerHTML=Object.entries(ec).length?Object.entries(ec).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<div class="osr"><span>${k}</span><span class="tr">${fmt(v)}</span></div>`).join('')+`<div class="osr tot"><span>TOTAL</span><span class="tr">${fmt(exp)}</span></div><div class="osr tot" style="font-size:13px"><span>NET INCOME</span><span style="color:${net>=0?'var(--grn)':'var(--red)'}">${fmt(net)}</span></div>`:'<div class="empty">Import PDF</div>';}
+function rOper(){
+  // Totals = what is ACTUALLY in the system (must equal the detail lines below).
+  // Prime prints its own YTD figures on each settlement (DB.op.ytd*) — those are
+  // shown as a labeled reference strip, never silently substituted into totals.
+  const rev=DB.sett.reduce((a,x)=>a+(x.gross||0),0);
+  const exp=DB.ded.reduce((a,x)=>a+(x.amount||0),0);
+  const net=rev-exp;
+  const ytdEl=$('op-prime-ytd');
+  if(ytdEl){
+    if(DB.op&&(DB.op.ytdRevenue||DB.op.ytdExpenses)){
+      ytdEl.style.display='block';
+      ytdEl.innerHTML='<b style="color:var(--acc)">📄 Prime YTD (printed on latest settlement)</b> — Revenue: <b>'+fmt(DB.op.ytdRevenue||0)+'</b> · Deductions: <b>'+fmt(DB.op.ytdExpenses||0)+'</b> · Net: <b>'+fmt(DB.op.ytdNet||((DB.op.ytdRevenue||0)-(DB.op.ytdExpenses||0)))+'</b><br><span style="color:var(--mut)">Reference from Prime\u2019s own YTD column. The totals below reflect only settlements imported into this system — import all weekly PDFs and the two should converge.</span>';
+    }else ytdEl.style.display='none';
+  }$('op-rev').textContent=fmt(rev);$('op-exp').textContent=fmt(exp);$('op-net').textContent=fmt(net);$('op-net').style.color=net>=0?'var(--grn)':'var(--red)';const rc={};DB.sett.flatMap(x=>x.revenueItems||[]).forEach(x=>{rc[x.desc]=(rc[x.desc]||0)+(x.amount||0);});$('op-revd').innerHTML=Object.entries(rc).length?Object.entries(rc).map(([k,v])=>`<div class="osr"><span>${k}</span><span class="tg">${fmt(v)}</span></div>`).join('')+`<div class="osr tot"><span>Total</span><span class="tg">${fmt(rev)}</span></div>`:'<div class="empty">Import PDF</div>';const ec={};DB.ded.forEach(x=>{const c=x.category||x.code||'Other';ec[c]=(ec[c]||0)+(x.amount||0);});$('op-expd').innerHTML=Object.entries(ec).length?Object.entries(ec).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<div class="osr"><span>${k}</span><span class="tr">${fmt(v)}</span></div>`).join('')+`<div class="osr tot"><span>TOTAL</span><span class="tr">${fmt(exp)}</span></div><div class="osr tot" style="font-size:13px"><span>NET INCOME</span><span style="color:${net>=0?'var(--grn)':'var(--red)'}">${fmt(net)}</span></div>`:'<div class="empty">Import PDF</div>';}
 // International A26 spec-card intervals — MPG-tiered oil/fuel-filter/DPF, fixed DEF/coolant, staged valve lash.
 function oilMi(mpg,sampling){return 50000;}
 function dpfMi(mpg){if(mpg>=6.5)return 600000;if(mpg>=5.5)return 500000;return 350000;}
@@ -2386,16 +2400,30 @@ function aiQ(q){$('ai-inp').value=q;sendAI();}
 
 // ═══ TAX ═══
 function calcPerDiemDays(){
-  let days=0;
-  DB.loads.forEach(load=>{
-    if(load.pickupDate&&load.deliveryDate){
-      const p=new Date(load.pickupDate+'T12:00:00');
-      const d=new Date(load.deliveryDate+'T12:00:00');
-      const diff=Math.round((d-p)/(1000*60*60*24));
-      if(diff>0)days+=diff;
+  // Days on road for per diem — realistic OTR counting:
+  // • each load range counts INCLUSIVE (same-day load = 1 day, not 0)
+  // • overlapping loads merge (no double counting)
+  // • gaps of up to 3 days between consecutive loads are bridged — waiting at a
+  //   truck stop between loads is still a day away from your tax home
+  // Estimate only — verify exact day counts against ELD logs with your CPA.
+  const ranges=[];
+  DB.loads.forEach(l=>{
+    if(l.pickupDate&&l.deliveryDate){
+      const p=new Date(l.pickupDate+'T12:00:00'),d=new Date(l.deliveryDate+'T12:00:00');
+      if(!isNaN(p)&&!isNaN(d)&&d>=p)ranges.push([p,d]);
     }
-    // No estimate if dates missing - only real dates count
   });
+  if(!ranges.length)return 0;
+  ranges.sort((a,b)=>a[0]-b[0]);
+  const merged=[[ranges[0][0],ranges[0][1]]];
+  for(let i=1;i<ranges.length;i++){
+    const last=merged[merged.length-1],cur=ranges[i];
+    const gapDays=Math.round((cur[0]-last[1])/86400000);
+    if(gapDays<=3){if(cur[1]>last[1])last[1]=cur[1];}
+    else merged.push([cur[0],cur[1]]);
+  }
+  let days=0;
+  merged.forEach(r=>{days+=Math.round((r[1]-r[0])/86400000)+1;});
   return days;
 }
 function syncTax(){
@@ -2415,7 +2443,7 @@ function syncTax(){
     calcTax();
     // Show per diem note
     const pd=$('perdiem-note');
-    if(pd)pd.innerHTML=`<div style="background:rgba(79,124,255,.1);border:1px solid var(--acc);border-radius:7px;padding:10px;margin-bottom:10px;font-size:11px"><b style="color:var(--acc)">📅 Per Diem Auto-Calculated</b><br>${perDiemDays} days on road × $64/day = <b style="color:var(--grn)">${fmt(perDiemDeduct)}</b> deduction included in expenses<br><span style="color:var(--mut)">ℹ️ Income = NET settlement pay (ELD/insurance/truck payments Prime withholds are already out — not double-counted). Expenses = your out-of-pocket purchases only.</span></div>`;
+    if(pd)pd.innerHTML=`<div style="background:rgba(79,124,255,.1);border:1px solid var(--acc);border-radius:7px;padding:10px;margin-bottom:10px;font-size:11px"><b style="color:var(--acc)">📅 Per Diem Auto-Calculated</b><br>${perDiemDays} days on road (load spans + short between-load gaps) × $64/day = <b style="color:var(--grn)">${fmt(perDiemDeduct)}</b> deduction included in expenses<br><span style="color:var(--mut)">ℹ️ Income = NET settlement pay (ELD/insurance/truck payments Prime withholds are already out — not double-counted). Expenses = your out-of-pocket purchases only.</span></div>`;
     // Update dashboard tax cards
     const txTot=$('tx-all');const txQtr=$('tx-qtr');
     if(txTot&&$('d-tax-est')){
@@ -2555,7 +2583,7 @@ function showPrev(d){
   let items=[];
   if(d.docType==='settlement'&&d.settlement){const s=d.settlement;items=[{l:'Gross Revenue',v:s.grossRevenue,c:'var(--grn)'},{l:'Net Pay',v:s.netPay,c:'var(--acc)'},{l:'Deductions',v:s.totalDeductions,c:'var(--red)'},{l:'Miles',t:(s.totalMiles||0).toLocaleString()+' mi'},{l:'Loads',t:(s.loads||[]).length+' loads'},{l:'Tractor Fuel',v:(s.tractorFuel||[]).reduce((a,x)=>a+(x.amount||0),0),c:'var(--red)'},{l:'Reefer Fuel',v:(s.reeferFuel||[]).reduce((a,x)=>a+(x.amount||0),0),c:'var(--red)'},...(s.deductions||[]).slice(0,4).map(x=>({l:x.code+' '+x.desc,v:x.amount,c:'var(--red)'})),];}
   else if(d.docType==='fuel'&&d.fuel){const f=d.fuel;items=[{l:'Type',t:f.type},{l:'Station',t:f.station},{l:'Gallons',t:(f.gallons||0).toFixed(1)+' gal'},{l:'Gross',v:f.gross,c:'var(--red)'},{l:'Discount',v:f.discount,c:'var(--grn)'},{l:'Net',v:f.net,c:'var(--red)'}];}
-  else if(d.docType==='amazon'&&d.purchase){const p=d.purchase;const comp=computeStoreRows(p,d);items=comp.rows.map(x=>({l:(x.qty>1?x.qty+'× ':'')+x.name+(x.warrantyYears?' 🛡️'+x.warrantyYears+'y':''),v:x.finalTotal,c:/^NEEDS REVIEW/i.test(x.name)?'var(--org)':'var(--acc)'}));if(comp.extra>0.009)items.push({l:'↳ Item totals include '+fmt(comp.extra)+' sales tax, fees & service add-ons',t:' ',c:'var(--mut)'});items.push({l:'TOTAL',v:comp.grand,c:'var(--grn)'});if(p.paymentMethod)items.push({l:'Payment Method',paySel:true,t:p.paymentMethod});}
+  else if(d.docType==='amazon'&&d.purchase){const p=d.purchase;const comp=computeStoreRows(p,d);items=comp.rows.map(x=>({l:(x.qty>1?x.qty+'× ':'')+x.name+(x.warrantyYears?' 🛡️'+x.warrantyYears+'y':''),v:x.finalTotal,c:/^NEEDS REVIEW/i.test(x.name)?'var(--org)':'var(--acc)'}));const _inc=+((comp.extra+comp.rows.reduce((a,x)=>a+(x.svcAdd||0),0)).toFixed(2));if(_inc>0.009)items.push({l:'↳ Item totals include '+fmt(_inc)+' sales tax, fees & service add-ons',t:' ',c:'var(--mut)'});items.push({l:'TOTAL',v:comp.grand,c:'var(--grn)'});if(p.paymentMethod)items.push({l:'Payment Method',paySel:true,t:p.paymentMethod});}
   $('p-items').innerHTML=items.filter(x=>x.v||x.t).map(x=>{
     if(x.paySel){
       const cur=mapLegacyPayment(x.t);
@@ -2606,8 +2634,13 @@ const VAGUE_ITEM_RE=/^(add.?ons?|add.?on services?|services?|service fees?|misc(
 function isFoldableServiceLine(name){
   const n=(name||'').trim();
   if(VAGUE_ITEM_RE.test(n))return true;
+  if(/^add.?ons?\b/i.test(n))return true;                                  // "Add-on ..." anything
+  if(/\bservices?\s*\(for\b/i.test(n))return true;                        // "... service (for X)"
+  if(/\b(installation|delivery|assembly|set.?up|activation|handling)\b.*\b(service|fee)s?\b/i.test(n))return true;
   return /(protection|warranty|service|care|coverage)\s*plan|extended warranty|allstate|asurion|squaretrade|applecare|walmart protection/i.test(n);
 }
+// "... (for STARLINK Mini Kit)" → "STARLINK Mini Kit" (targeted folding)
+function foldTargetName(name){const m=/\(for\s+([^)]+)\)/i.exec(name||'');return m?m[1].trim():null;}
 function flagVagueName(name){
   const n=(name||'').trim();
   if(!n)return 'NEEDS REVIEW: unnamed line';
@@ -2624,8 +2657,16 @@ function computeStoreRows(p,d){
     .filter(x=>x.cost>0);
   let rows=allItems.filter(x=>!isFoldableServiceLine(x.name));
   const foldedPlans=allItems.filter(x=>isFoldableServiceLine(x.name));
-  let foldSum=+(foldedPlans.reduce((a,x)=>a+x.cost,0).toFixed(2));
-  if(!rows.length){rows=allItems.map(x=>({...x,name:flagVagueName(x.name)}));foldSum=0;}
+  let foldSum=0;
+  if(!rows.length){rows=allItems.map(x=>({...x,name:flagVagueName(x.name)}));}
+  else foldedPlans.forEach(f=>{
+    // If the service names its parent ("(for X)"), fold DIRECTLY into that item;
+    // otherwise into the general pot distributed across all items.
+    const t=f.warrantyFor||foldTargetName(f.name);
+    let target=t?rows.find(y=>y.name.toLowerCase().includes(String(t).toLowerCase().slice(0,20))||String(t).toLowerCase().includes(y.name.toLowerCase().slice(0,20))):null;
+    if(target){target.cost=+((target.cost+f.cost).toFixed(2));target.svcAdd=+(((target.svcAdd||0)+f.cost).toFixed(2));}
+    else foldSum=+((foldSum+f.cost).toFixed(2));
+  });
   const allSum=+(allItems.reduce((a,x)=>a+x.cost,0).toFixed(2));
   const rowSum=+(rows.reduce((a,x)=>a+x.cost,0).toFixed(2));
   const grand=p.total||d.totalAmount||0;
@@ -2638,7 +2679,7 @@ function computeStoreRows(p,d){
     const biggest=rows.reduce((a,b)=>a.cost>=b.cost?a:b);
     biggest.taxShare=+((biggest.taxShare+remainder).toFixed(2));
   }
-  rows.forEach(x=>{x.finalTotal=+((x.cost+(x.taxShare||0)).toFixed(2));});
+  rows.forEach(x=>{x.finalTotal=+((x.cost+(x.taxShare||0)).toFixed(2));x.noteExtra=+(((x.taxShare||0)+(x.svcAdd||0)).toFixed(2));});
   // Warranty carry-over from folded plans (plan line disappears; coverage stays)
   rows.concat(foldedPlans).forEach(x=>{
     if(!x.warrantyYears)return;
@@ -2710,7 +2751,7 @@ async function saveImport(){
       const cat=guessCategory(x.name,storeName);
       const note=getCatNote(cat);
       const qtyLabel=x.qty>1?x.qty+'× ':'';
-      const taxNote=(x.taxShare||0)>0?' (incl. '+fmt(x.taxShare)+' tax/fees/services)':'';
+      const taxNote=(x.noteExtra||0)>0?' (incl. '+fmt(x.noteExtra)+' tax/fees/services)':'';
       const dedRec={id:uid(),date:d.date,code:'EQUIP',desc:qtyLabel+x.name+' — '+note+taxNote+' | '+storeName+' | '+payMethod+(_personalPay&&_addContrib?' — Owner Contribution':''),amount:totalCost,category:cat,store:storeName,payment:payMethod,warrantyYears:x.warrantyYears||null};
       DB.ded.push(dedRec);
       x._dedRef=dedRec;
@@ -2983,6 +3024,32 @@ window.addEventListener('load',()=>{
       merged++;
     });
     if(merged>0){saveDB();cleanupOrphanedContributions(true);console.log('Merged',merged,'tax rows into item costs');}
+    // Pass 2 (2026-07-07): fold already-saved add-on/service rows into their parent
+    // item (matched via "(for X)" in the name, else same store+date proportionally).
+    const svcRows=DB.ded.filter(x=>x.code==='EQUIP'&&isFoldableServiceLine((x.desc||'').split(' — ')[0]));
+    let folded=0;
+    svcRows.forEach(sr=>{
+      const nm=(sr.desc||'').split(' — ')[0];
+      const siblings=DB.ded.filter(x=>x!==sr&&x.code==='EQUIP'&&x.store===sr.store&&x.date===sr.date&&!isFoldableServiceLine((x.desc||'').split(' — ')[0]));
+      if(!siblings.length)return;
+      const t=foldTargetName(nm);
+      let target=t?siblings.find(y=>(y.desc||'').toLowerCase().includes(String(t).toLowerCase().slice(0,20))):null;
+      const targets=target?[target]:siblings;
+      const tSum=targets.reduce((a,x)=>a+(x.amount||0),0)||1;
+      let alloc=0;
+      targets.forEach((x,i)=>{
+        let share=i===targets.length-1?+(((sr.amount||0)-alloc).toFixed(2)):+(((sr.amount||0)*(x.amount/tSum)).toFixed(2));
+        alloc=+((alloc+share).toFixed(2));
+        x.amount=+((x.amount+share).toFixed(2));
+        x.desc=(x.desc||'').replace(/ \(incl\. \$[\d,.]+ tax\/fees(\/services)?\)/,'');
+        x.desc=x.desc.replace(/( \| )/,' (incl. '+fmt(share)+' tax/fees/services)$1');
+        syncContributionForDeduction(x);
+      });
+      const idx=DB.ded.indexOf(sr);
+      if(idx>-1)DB.ded.splice(idx,1);
+      folded++;
+    });
+    if(folded>0){saveDB();cleanupOrphanedContributions(true);console.log('Folded',folded,'service rows into parent items');}
   }catch(e){console.error('tax-merge:',e);}
   // One-time migration: older imports didn't tag settlement-withheld deductions. Any deduction
   // whose date matches a settlement AND has no payment/source info is treated as withheld.
