@@ -144,7 +144,7 @@ canvas{max-height:160px;}
     <div class="ni" onclick="go('settings',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M5.64 5.64a10 10 0 0 1 0 13.13"/></svg>Settings</div>
   </div>
   <div class="suser"><div class="sav">AB</div><div class="sui">Ali Bozkurt<small>Graywolf Logistics</small></div></div>
-  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.07.06-I</div>
+  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.07.06-J</div>
 </div>
 <div id="main">
   <div id="readonly-banner" style="display:none;background:var(--org);color:#000;padding:6px 18px;align-items:center;gap:8px;font-size:12px;font-weight:600">👀 View-Only Mode — you're looking, not editing. Ask the owner for changes.</div>
@@ -2555,7 +2555,7 @@ function showPrev(d){
   let items=[];
   if(d.docType==='settlement'&&d.settlement){const s=d.settlement;items=[{l:'Gross Revenue',v:s.grossRevenue,c:'var(--grn)'},{l:'Net Pay',v:s.netPay,c:'var(--acc)'},{l:'Deductions',v:s.totalDeductions,c:'var(--red)'},{l:'Miles',t:(s.totalMiles||0).toLocaleString()+' mi'},{l:'Loads',t:(s.loads||[]).length+' loads'},{l:'Tractor Fuel',v:(s.tractorFuel||[]).reduce((a,x)=>a+(x.amount||0),0),c:'var(--red)'},{l:'Reefer Fuel',v:(s.reeferFuel||[]).reduce((a,x)=>a+(x.amount||0),0),c:'var(--red)'},...(s.deductions||[]).slice(0,4).map(x=>({l:x.code+' '+x.desc,v:x.amount,c:'var(--red)'})),];}
   else if(d.docType==='fuel'&&d.fuel){const f=d.fuel;items=[{l:'Type',t:f.type},{l:'Station',t:f.station},{l:'Gallons',t:(f.gallons||0).toFixed(1)+' gal'},{l:'Gross',v:f.gross,c:'var(--red)'},{l:'Discount',v:f.discount,c:'var(--grn)'},{l:'Net',v:f.net,c:'var(--red)'}];}
-  else if(d.docType==='amazon'&&d.purchase){const p=d.purchase;items=(p.items||[]).map(x=>{const q=Math.max(1,parseInt(x.qty)||1);const vague=isFoldableServiceLine(x.name);const nm=vague?(x.name||'').trim()+' → folded into item costs':(x.name||'').trim();return{l:(q>1?q+'× ':'')+nm+(q>1&&!vague?' (@'+fmt(x.price||0)+' each)':''),v:(x.price||0)*q,c:vague?'var(--mut)':'var(--acc)'};});if(p.tax)items.push({l:'Tax & fees (distributed into item costs)',v:p.tax,c:'var(--mut)'});items.push({l:'TOTAL',v:p.total||d.totalAmount,c:'var(--grn)'});if(p.paymentMethod)items.push({l:'Payment Method',paySel:true,t:p.paymentMethod});}
+  else if(d.docType==='amazon'&&d.purchase){const p=d.purchase;const comp=computeStoreRows(p,d);items=comp.rows.map(x=>({l:(x.qty>1?x.qty+'× ':'')+x.name+(x.warrantyYears?' 🛡️'+x.warrantyYears+'y':''),v:x.finalTotal,c:/^NEEDS REVIEW/i.test(x.name)?'var(--org)':'var(--acc)'}));if(comp.extra>0.009)items.push({l:'↳ Item totals include '+fmt(comp.extra)+' sales tax, fees & service add-ons',t:' ',c:'var(--mut)'});items.push({l:'TOTAL',v:comp.grand,c:'var(--grn)'});if(p.paymentMethod)items.push({l:'Payment Method',paySel:true,t:p.paymentMethod});}
   $('p-items').innerHTML=items.filter(x=>x.v||x.t).map(x=>{
     if(x.paySel){
       const cur=mapLegacyPayment(x.t);
@@ -2614,6 +2614,41 @@ function flagVagueName(name){
   if(/^needs review/i.test(n))return n;
   return VAGUE_ITEM_RE.test(n)?'NEEDS REVIEW: '+n:n;
 }
+// SHARED store-purchase math — used by BOTH the preview and saveImport so
+// what you see is exactly what gets saved. Returns final rows: real items
+// only, each at its FINAL total (cost + proportional share of tax, fees and
+// folded service/plan lines). Receipt grand total preserved to the cent.
+function computeStoreRows(p,d){
+  const allItems=(p.items||[{name:d.summary||'Purchase',price:d.totalAmount,qty:1}])
+    .map(item=>{const qty=Math.max(1,parseInt(item.qty)||1);return{name:(item.name||'').trim()||'Item',qty,cost:+(((item.price||0)*qty).toFixed(2)),warrantyYears:(item.warrantyYears>0?+item.warrantyYears:null),warrantyFor:item.warrantyFor||null};})
+    .filter(x=>x.cost>0);
+  let rows=allItems.filter(x=>!isFoldableServiceLine(x.name));
+  const foldedPlans=allItems.filter(x=>isFoldableServiceLine(x.name));
+  let foldSum=+(foldedPlans.reduce((a,x)=>a+x.cost,0).toFixed(2));
+  if(!rows.length){rows=allItems.map(x=>({...x,name:flagVagueName(x.name)}));foldSum=0;}
+  const allSum=+(allItems.reduce((a,x)=>a+x.cost,0).toFixed(2));
+  const rowSum=+(rows.reduce((a,x)=>a+x.cost,0).toFixed(2));
+  const grand=p.total||d.totalAmount||0;
+  let extra=p.tax&&p.tax>0?+(+p.tax).toFixed(2):(grand>allSum+0.01?+((grand-allSum).toFixed(2)):0);
+  extra=+((extra+foldSum).toFixed(2));
+  let allocated=0;
+  rows.forEach(x=>{x.taxShare=rowSum>0?+((extra*(x.cost/rowSum)).toFixed(2)):0;allocated=+((allocated+x.taxShare).toFixed(2));});
+  const remainder=+((extra-allocated).toFixed(2));
+  if(Math.abs(remainder)>=0.01&&rows.length){
+    const biggest=rows.reduce((a,b)=>a.cost>=b.cost?a:b);
+    biggest.taxShare=+((biggest.taxShare+remainder).toFixed(2));
+  }
+  rows.forEach(x=>{x.finalTotal=+((x.cost+(x.taxShare||0)).toFixed(2));});
+  // Warranty carry-over from folded plans (plan line disappears; coverage stays)
+  rows.concat(foldedPlans).forEach(x=>{
+    if(!x.warrantyYears)return;
+    let target=null;
+    if(x.warrantyFor)target=rows.find(y=>y!==x&&y.name.toLowerCase().includes(String(x.warrantyFor).toLowerCase().slice(0,20)));
+    if(!target&&isFoldableServiceLine(x.name)&&rows.length===1)target=rows[0];
+    if(target&&!target.warrantyYears)target.warrantyYears=x.warrantyYears;
+  });
+  return{rows,grand,extra,foldSum};
+}
 function pPayHint(){
   const sel=document.getElementById('p-paysel'),h=document.getElementById('p-payhint');
   if(sel&&h)h.textContent=isPersonalPayment(sel.value)?'\u2192 Capital Contribution (will ask)':'';
@@ -2660,43 +2695,18 @@ async function saveImport(){
     // User can correct the AI's payment-method guess in the preview dropdown
     const _sel=document.getElementById('p-paysel');
     const payMethod=(_sel&&_sel.value)||mapLegacyPayment(p.paymentMethod)||'Business Credit Card';
-    // All store purchases → Deductions (IRS De Minimis rule — under $2,500)
-    // OWNER DECISION 2026-07-06: sales tax & fees are NOT separate rows anymore —
-    // they are distributed proportionally INTO each item's cost. The booked total
-    // still equals the receipt's grand total to the cent (remainder cents go to
-    // the largest item). One receipt line = one asset row, tax included.
-    const allItems=(p.items||[{name:d.summary||'Purchase',price:d.totalAmount,qty:1}])
-      .map(item=>{const qty=Math.max(1,parseInt(item.qty)||1);return{name:(item.name||'').trim()||'Item',qty,cost:+(((item.price||0)*qty).toFixed(2)),warrantyYears:(item.warrantyYears>0?+item.warrantyYears:null),warrantyFor:item.warrantyFor||null};})
-      .filter(x=>x.cost>0);
-    // OWNER DECISION 2026-07-06: vague service lines (Walmart "ADD ON SERVICES" etc.,
-    // usually protection/warranty services) don't become their own rows — their cost is
-    // folded into the tax/fees pot and distributed into the REAL items proportionally.
-    // The receipt's grand total is still booked to the cent; nothing is lost.
-    let rawItems=allItems.filter(x=>!isFoldableServiceLine(x.name));
-    const foldedPlans=allItems.filter(x=>isFoldableServiceLine(x.name));
-    let foldSum=+(foldedPlans.reduce((a,x)=>a+x.cost,0).toFixed(2));
-    if(!rawItems.length){rawItems=allItems.map(x=>({...x,name:flagVagueName(x.name)}));foldSum=0;} // whole receipt is service lines — keep, flagged // whole receipt vague — keep flagged
-    const allSum=+(allItems.reduce((a,x)=>a+x.cost,0).toFixed(2));
-    const itemsSum=+(rawItems.reduce((a,x)=>a+x.cost,0).toFixed(2));
-    const grand=p.total||d.totalAmount||0;
-    let extra=p.tax&&p.tax>0?+(+p.tax).toFixed(2):(grand>allSum+0.01?+((grand-allSum).toFixed(2)):0);
-    extra=+((extra+foldSum).toFixed(2));
-    let allocated=0;
-    rawItems.forEach(x=>{
-      x.taxShare=itemsSum>0?+((extra*(x.cost/itemsSum)).toFixed(2)):0;
-      allocated=+((allocated+x.taxShare).toFixed(2));
-    });
-    const remainder=+((extra-allocated).toFixed(2));
-    if(Math.abs(remainder)>=0.01&&rawItems.length){
-      const biggest=rawItems.reduce((a,b)=>a.cost>=b.cost?a:b);
-      biggest.taxShare=+((biggest.taxShare+remainder).toFixed(2));
-    }
+    // All store purchases → Deductions (IRS De Minimis rule — under $2,500).
+    // ONE shared computation with the preview (computeStoreRows): real items only,
+    // tax + fees + service/plan lines folded proportionally into item totals.
+    const _comp=computeStoreRows(p,d);
+    const rawItems=_comp.rows;
+    const grand=_comp.grand,extra=_comp.extra,itemsSum=_comp.rows.reduce((a,x)=>a+x.cost,0);
     let _contribTotal=0;
     // Personal payment? Ask ONCE per receipt before booking any Owner Contribution.
     const _personalPay=isPersonalPayment(payMethod);
     const _addContrib=_personalPay?confirmPersonalContribution(payMethod,grand||itemsSum+extra):false;
     rawItems.forEach(x=>{
-      const totalCost=+((x.cost+(x.taxShare||0)).toFixed(2));
+      const totalCost=x.finalTotal;
       const cat=guessCategory(x.name,storeName);
       const note=getCatNote(cat);
       const qtyLabel=x.qty>1?x.qty+'× ':'';
@@ -2709,16 +2719,7 @@ async function saveImport(){
         _contribTotal+=totalCost;
       }
     });
-    // Warranty stamping: folded protection plans (and any item with warrantyFor)
-    // pass their duration onto the covered item's saved row — the plan line itself
-    // is gone, but the coverage lives on the real product.
-    rawItems.concat(foldedPlans).forEach(x=>{
-      if(!x.warrantyYears)return;
-      let target=null;
-      if(x.warrantyFor)target=rawItems.find(y=>y!==x&&y.name.toLowerCase().includes(String(x.warrantyFor).toLowerCase().slice(0,20)));
-      if(!target&&isFoldableServiceLine(x.name)&&rawItems.length===1)target=rawItems[0]; // single-item receipt: plan covers it
-      if(target&&target._dedRef&&!target._dedRef.warrantyYears){target._dedRef.warrantyYears=x.warrantyYears;}
-    });
+    // (warranty carry-over already handled inside computeStoreRows)
     d._contribTotal=_contribTotal;
     // Items saved directly to Deductions
   }else{
