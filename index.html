@@ -144,7 +144,7 @@ canvas{max-height:160px;}
     <div class="ni" onclick="go('settings',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M5.64 5.64a10 10 0 0 1 0 13.13"/></svg>Settings</div>
   </div>
   <div class="suser"><div class="sav">AB</div><div class="sui">Ali Bozkurt<small>Graywolf Logistics</small></div></div>
-  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.07.07-F</div>
+  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.07.07-G</div>
 </div>
 <div id="main">
   <div id="readonly-banner" style="display:none;background:var(--org);color:#000;padding:6px 18px;align-items:center;gap:8px;font-size:12px;font-weight:600">👀 View-Only Mode — you're looking, not editing. Ask the owner for changes.</div>
@@ -2344,6 +2344,35 @@ function exportData(){
 // 🧹 Scans the whole "graywolflogistics2026 documents" tree, finds files sharing the
 // exact same name inside the same folder, keeps the NEWEST copy of each, trashes the
 // rest. Also collapses old timestamped backups into the daily scheme (keeps newest per day).
+// Moves EVERY file in the "graywolflogistics2026 documents" tree to Drive Trash
+// (folders kept, recoverable 30 days). Used by the financial reset on request.
+async function driveWipeDocuments(){
+  const ok=await ensureDriveToken();
+  if(!ok)throw new Error('No Drive token');
+  const rootId=await driveFindOrCreateFolder(DRIVE_ROOT_FOLDER,null);
+  const folders=[rootId];
+  for(let depth=0;depth<4;depth++){
+    const level=folders.slice();
+    for(const fid of level){
+      const q=`'${fid}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`;
+      const r=await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id)&pageSize=100`,{headers:{Authorization:'Bearer '+gAccessToken}});
+      const d=await r.json();
+      (d.files||[]).forEach(f=>{if(!folders.includes(f.id))folders.push(f.id);});
+    }
+    if(folders.length>60)break;
+  }
+  let trashed=0;
+  for(const fid of folders){
+    const q=`'${fid}' in parents and mimeType!='application/vnd.google-apps.folder' and trashed=false`;
+    const r=await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id)&pageSize=1000`,{headers:{Authorization:'Bearer '+gAccessToken}});
+    const d=await r.json();
+    for(const f of(d.files||[])){
+      await fetch('https://www.googleapis.com/drive/v3/files/'+f.id,{method:'PATCH',headers:{Authorization:'Bearer '+gAccessToken,'Content-Type':'application/json'},body:JSON.stringify({trashed:true})});
+      trashed++;
+    }
+  }
+  return trashed;
+}
 async function cleanDriveDuplicates(btn){
   if(!driveConnected()){alert('Connect Google Drive first (Settings).');return;}
   if(!confirm('🧹 Scan Drive for duplicate documents?\n\nFiles with the SAME NAME in the SAME folder: newest copy is kept, older copies go to Drive Trash (recoverable for 30 days).'))return;
@@ -2457,8 +2486,13 @@ function clearFinancialData(){
   localStorage.removeItem('gw_bankstmts');
   localStorage.removeItem('gw_chkstmts');
   BANK_STMTS.length=0;CHK_STMTS.length=0;
-  alert('✅ Financial data reset. Truck Health & Maintenance untouched.\n\nYou can now re-import your PDFs cleanly — no duplicate warnings, and files will land in the new Week-by-week Drive folders.');
-  location.reload();
+  const finish=()=>{alert('✅ Financial data reset. Truck Health & Maintenance untouched.\n\nYou can now re-import your PDFs cleanly — files will land in the Week-by-week Drive folders.');location.reload();};
+  // Optional matching Drive cleanup — reset in the app + reset in the archive together.
+  if(driveConnected()&&confirm('🧹 Also move ALL files in "graywolflogistics2026 documents" (Drive) to Trash?\n\nFolders stay; files are recoverable from Drive Trash for 30 days.\n\nOK = yes, clean Drive too\nCancel = keep Drive files')){
+    driveWipeDocuments()
+      .then(n=>{alert('🧹 Drive cleaned — '+n+' file(s) moved to Trash.');finish();})
+      .catch(e=>{alert('Drive cleanup failed ('+e.message+') — app data was still reset.');finish();});
+  }else finish();
 }
 
 // ═══ AI ADVISOR ═══
