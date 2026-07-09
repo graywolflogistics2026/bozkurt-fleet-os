@@ -144,7 +144,7 @@ canvas{max-height:160px;}
     <div class="ni" onclick="go('settings',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M5.64 5.64a10 10 0 0 1 0 13.13"/></svg>Settings</div>
   </div>
   <div class="suser"><div class="sav">AB</div><div class="sui">Ali Bozkurt<small>Graywolf Logistics</small></div></div>
-  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.07.07-H</div>
+  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.07.09-A</div>
 </div>
 <div id="main">
   <div id="readonly-banner" style="display:none;background:var(--org);color:#000;padding:6px 18px;align-items:center;gap:8px;font-size:12px;font-weight:600">👀 View-Only Mode — you're looking, not editing. Ask the owner for changes.</div>
@@ -2517,43 +2517,18 @@ function aiQ(q){$('ai-inp').value=q;sendAI();}
 
 // ═══ TAX ═══
 function calcPerDiemDays(){
-  // Days on road for per diem — realistic OTR counting:
-  // • each load range counts INCLUSIVE (same-day load = 1 day, not 0)
-  // • overlapping loads merge (no double counting)
-  // • gaps of up to 3 days between consecutive loads are bridged — waiting at a
-  //   truck stop between loads is still a day away from your tax home
+  // DETERMINISTIC per diem (owner decision 2026-07-09): 7 days on road per
+  // DISTINCT settlement week. Same rule on web and mobile; never depends on
+  // whether the AI happened to extract load dates on a given run — importing
+  // the same PDF twice can never change this number. Full-time OTR reality:
+  // a settled week = a week away from your tax home.
   // Estimate only — verify exact day counts against ELD logs with your CPA.
-  const ranges=[];
-  DB.loads.forEach(l=>{
-    if(l.pickupDate&&l.deliveryDate){
-      const p=new Date(l.pickupDate+'T12:00:00'),d=new Date(l.deliveryDate+'T12:00:00');
-      if(!isNaN(p)&&!isNaN(d)&&d>=p)ranges.push([p,d]);
-    }
-  });
-  // Fallback for settlements whose loads carry no dates (AI couldn't extract, or
-  // older imports): a full-time OTR settlement week counts as 7 days on road
-  // [weekEnding-6 .. weekEnding] — added only if it doesn't overlap dated loads.
+  const weeks=new Set();
   DB.sett.forEach(s=>{
     const wk=s.weekEnding||s.date;
-    if(!wk)return;
-    const end=new Date(wk+'T12:00:00');
-    if(isNaN(end))return;
-    const start=new Date(end);start.setDate(start.getDate()-6);
-    const overlaps=ranges.some(r=>start<=r[1]&&end>=r[0]);
-    if(!overlaps)ranges.push([start,end]);
+    if(wk)weeks.add(wk);
   });
-  if(!ranges.length)return 0;
-  ranges.sort((a,b)=>a[0]-b[0]);
-  const merged=[[ranges[0][0],ranges[0][1]]];
-  for(let i=1;i<ranges.length;i++){
-    const last=merged[merged.length-1],cur=ranges[i];
-    const gapDays=Math.round((cur[0]-last[1])/86400000);
-    if(gapDays<=3){if(cur[1]>last[1])last[1]=cur[1];}
-    else merged.push([cur[0],cur[1]]);
-  }
-  let days=0;
-  merged.forEach(r=>{days+=Math.round((r[1]-r[0])/86400000)+1;});
-  return days;
+  return weeks.size*7;
 }
 function syncTax(){
   // Net-pay model: income = NET settlements (payroll deductions like ELD/insurance are already
@@ -2572,7 +2547,7 @@ function syncTax(){
     calcTax();
     // Show per diem note
     const pd=$('perdiem-note');
-    if(pd)pd.innerHTML=`<div style="background:rgba(79,124,255,.1);border:1px solid var(--acc);border-radius:7px;padding:10px;margin-bottom:10px;font-size:11px"><b style="color:var(--acc)">📅 Per Diem Auto-Calculated</b><br>${perDiemDays} days on road (load date spans / settlement weeks) × $64/day = <b style="color:var(--grn)">${fmt(perDiemDeduct)}</b> deduction included in expenses<br><span style="color:var(--mut)">ℹ️ Income = NET settlement pay (ELD/insurance/truck payments Prime withholds are already out — not double-counted). Expenses = your out-of-pocket purchases only.</span></div>`;
+    if(pd)pd.innerHTML=`<div style="background:rgba(79,124,255,.1);border:1px solid var(--acc);border-radius:7px;padding:10px;margin-bottom:10px;font-size:11px"><b style="color:var(--acc)">📅 Per Diem Auto-Calculated</b><br>${perDiemDays} days on road (7 days per settlement week) × $64/day = <b style="color:var(--grn)">${fmt(perDiemDeduct)}</b> deduction included in expenses<br><span style="color:var(--mut)">ℹ️ Income = NET settlement pay (ELD/insurance/truck payments Prime withholds are already out — not double-counted). Expenses = your out-of-pocket purchases only.</span></div>`;
     // Update dashboard tax cards
     const txTot=$('tx-all');const txQtr=$('tx-qtr');
     if(txTot&&$('d-tax-est')){
@@ -2833,12 +2808,29 @@ async function saveImport(){
   if((_dupe.byContent.length||_dupe.byFilename.length)&&!confirm('⚠️ This looks like a duplicate (same date/amount or filename as something already saved).\n\nSave it anyway?')){PENDING=d;return;}
   if(dt==='settlement'&&d.settlement){
     const s=d.settlement;
-    DB.sett.push({id:uid(),date:d.date,weekEnding:s.weekEnding,carrier:s.carrier,gross:s.grossRevenue,reimb:s.reimbursements,ded:s.totalDeductions,net:s.netPay,miles:s.totalMiles,revenueItems:s.revenueItems||[]});
-    (s.loads||[]).forEach(l=>{const pickupDate=l.pickupDate||l.date||d.date;const deliveryDate=l.deliveryDate||l.dropDate||null;DB.loads.push({id:uid(),date:d.date,pickupDate,deliveryDate,...l});});
-    (s.tractorFuel||[]).forEach(f=>DB.fuel.tr.push({id:uid(),date:f.date||d.date,...f}));
-    (s.reeferFuel||[]).forEach(f=>DB.fuel.re.push({id:uid(),date:f.date||d.date,...f}));
-    (s.reimbursementItems||[]).forEach(r=>DB.reimb.push({id:uid(),date:d.date,...r}));
-    (s.deductions||[]).forEach(x=>DB.ded.push({id:uid(),date:d.date,source:'settlement',payment:'Settlement Withheld',...x}));
+    // RE-IMPORT = REPLACE (2026-07-09): importing the same settlement week again
+    // must never duplicate anything. Every row from a settlement import carries a
+    // batch tag ('sett-'+weekEnding); if that batch already exists, its rows are
+    // removed first — so numbers (revenue, weeks, per diem) stay identical no
+    // matter how many times the same PDF is imported.
+    const wk=s.weekEnding||d.date;
+    const batch='sett-'+wk;
+    const hadOld=DB.sett.some(x=>x._batch===batch||x.weekEnding===wk||(!x.weekEnding&&x.date===d.date));
+    if(hadOld){
+      DB.sett=DB.sett.filter(x=>!(x._batch===batch||x.weekEnding===wk||(!x.weekEnding&&x.date===d.date)));
+      DB.loads=DB.loads.filter(x=>!(x._batch===batch||x.date===d.date));
+      DB.fuel.tr=DB.fuel.tr.filter(x=>x._batch!==batch);
+      DB.fuel.re=DB.fuel.re.filter(x=>x._batch!==batch);
+      DB.reimb=DB.reimb.filter(x=>!(x._batch===batch||x.date===d.date));
+      DB.ded=DB.ded.filter(x=>!(x._batch===batch||(x.source==='settlement'&&x.date===d.date)));
+      console.log('Settlement re-import: replaced existing week '+wk);
+    }
+    DB.sett.push({id:uid(),_batch:batch,date:d.date,weekEnding:s.weekEnding,carrier:s.carrier,gross:s.grossRevenue,reimb:s.reimbursements,ded:s.totalDeductions,net:s.netPay,miles:s.totalMiles,revenueItems:s.revenueItems||[]});
+    (s.loads||[]).forEach(l=>{const pickupDate=l.pickupDate||l.date||d.date;const deliveryDate=l.deliveryDate||l.dropDate||null;DB.loads.push({id:uid(),_batch:batch,date:d.date,pickupDate,deliveryDate,...l});});
+    (s.tractorFuel||[]).forEach(f=>DB.fuel.tr.push({id:uid(),_batch:batch,date:f.date||d.date,...f}));
+    (s.reeferFuel||[]).forEach(f=>DB.fuel.re.push({id:uid(),_batch:batch,date:f.date||d.date,...f}));
+    (s.reimbursementItems||[]).forEach(r=>DB.reimb.push({id:uid(),_batch:batch,date:d.date,...r}));
+    (s.deductions||[]).forEach(x=>DB.ded.push({id:uid(),_batch:batch,date:d.date,source:'settlement',payment:'Settlement Withheld',...x}));
     (s.maintenance||[]).forEach(m=>{const type=m.serviceType||detectMaintType(m.desc);const rec={id:uid(),date:d.date,invoice:m.invoice,unit:m.unit,desc:m.desc,parts:m.parts,labor:m.labor,total:m.total,covered:m.covered,odo:m.odometer||0,type};DB.maint.push(rec);applyMaintToHealth(rec);});
     (s.tolls?.ezpass?.items||[]).forEach(t=>DB.tolls.ez.push({id:uid(),...t}));
     (s.tolls?.drivewyze?.items||[]).forEach(t=>DB.tolls.dw.push({id:uid(),...t}));
