@@ -144,7 +144,7 @@ canvas{max-height:160px;}
     <div class="ni" onclick="go('settings',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M5.64 5.64a10 10 0 0 1 0 13.13"/></svg>Settings</div>
   </div>
   <div class="suser"><div class="sav">AB</div><div class="sui">Ali Bozkurt<small>Graywolf Logistics</small></div></div>
-  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.07.09-A</div>
+  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.07.17-B</div>
 </div>
 <div id="main">
   <div id="readonly-banner" style="display:none;background:var(--org);color:#000;padding:6px 18px;align-items:center;gap:8px;font-size:12px;font-weight:600">👀 View-Only Mode — you're looking, not editing. Ask the owner for changes.</div>
@@ -1338,6 +1338,10 @@ async function uploadToOrganizedDrive(fileObj,folderParts,filename){
 
 const $=id=>document.getElementById(id);
 const fmt=n=>'$'+(+(n||0)).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+// Sum of tax-deductible expense rows. Advance/loan-principal repayments carry
+// taxDeductible:false (the purchase they repay was already expensed) and are
+// excluded from every deduction total, net and tax figure.
+function dedTotal(){return DB.ded.reduce((a,x)=>a+(x.taxDeductible===false?0:(x.amount||0)),0);}
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,5);
 const fd=d=>{if(!d)return'—';try{return new Date(d+'T12:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});}catch{return d;}};
 
@@ -1360,7 +1364,7 @@ function go(id,el){
 // ═══ RENDER FUNCTIONS ═══
 function rDash(){
   const rev=DB.sett.reduce((a,x)=>a+(x.gross||0),0);
-  const ded=DB.ded.reduce((a,x)=>a+(x.amount||0),0);
+  const ded=dedTotal();
   const net=DB.sett.reduce((a,x)=>a+(x.net||0),0);
   const mi=DB.sett.reduce((a,x)=>a+(x.miles||0),0);
   $('d-rev').textContent=fmt(rev);$('d-ded').textContent=fmt(ded);
@@ -1416,7 +1420,7 @@ function rDash(){
   const totalMiles=DB.sett.reduce((a,x)=>a+(x.miles||0),0);
   if(totalMiles>0){
     const grossRev=DB.sett.reduce((a,x)=>a+(x.gross||0),0);
-    const totalCost=DB.ded.reduce((a,x)=>a+(x.amount||0),0);
+    const totalCost=dedTotal();
     const rpm=grossRev/totalMiles,cpm=totalCost/totalMiles,ppm=rpm-cpm;
     if($('d-rpm'))$('d-rpm').textContent='$'+rpm.toFixed(2);
     if($('d-cpm'))$('d-cpm').textContent='$'+cpm.toFixed(2);
@@ -1957,7 +1961,7 @@ function rOper(){
   // Prime prints its own YTD figures on each settlement (DB.op.ytd*) — those are
   // shown as a labeled reference strip, never silently substituted into totals.
   const rev=DB.sett.reduce((a,x)=>a+(x.gross||0),0);
-  const exp=DB.ded.reduce((a,x)=>a+(x.amount||0),0);
+  const exp=dedTotal();
   const net=rev-exp;
   const ytdEl=$('op-prime-ytd');
   if(ytdEl){
@@ -2047,7 +2051,7 @@ function calcHealth(){
   rHealth(h);
 }
 function calcCF(){const b=parseFloat($('cf-b').value)||0,wr=parseFloat($('cf-wr').value)||0,tp=parseFloat($('cf-tp').value)||1145,fu=parseFloat($('cf-fu').value)||1800,ins=parseFloat($('cf-ins').value)||0,oth=parseFloat($('cf-oth').value)||500,tx=(parseFloat($('cf-tax').value)||25)/100;const wExp=tp+fu+oth+ins/4.33;const wNet=wr-wExp;const taxR=wNet*tx;const wNA=wNet-taxR;const r30=wr*4.33,n30=b+wNA*4.33;$('cf-bank').textContent=fmt(b);$('cf-rev30').textContent=fmt(r30);$('cf-net30').textContent=fmt(n30);$('cf-net30').style.color=n30>=0?'var(--grn)':'var(--red)';$('cf-fore').innerHTML=`<div class="osr"><span>Bank</span><span class="tg">${fmt(b)}</span></div><div class="osr"><span>Revenue 30d</span><span class="tg">+${fmt(r30)}</span></div><div class="osr"><span>Truck Payment</span><span class="tr">-${fmt(tp*4.33)}</span></div><div class="osr"><span>Fuel</span><span class="tr">-${fmt(fu*4.33)}</span></div><div class="osr"><span>Insurance</span><span class="tr">-${fmt(ins)}</span></div><div class="osr"><span>Other</span><span class="tr">-${fmt(oth*4.33)}</span></div><div class="osr"><span>Tax Reserve</span><span class="tr">-${fmt(taxR*4.33)}</span></div><div class="osr tot"><span>NET (30 days)</span><span style="color:${n30>=0?'var(--grn)':'var(--red)'};font-size:14px">${fmt(n30)}</span></div><div style="margin-top:8px;padding:8px;background:var(--card2);border-radius:7px"><div class="tm" style="font-size:10px">Weekly tax reserve</div><div style="font-size:18px;font-weight:700;color:var(--org)">${fmt(taxR)}/wk</div></div>`;let h='<table><thead><tr><th>Week</th><th>Revenue</th><th>Expenses</th><th>Net</th><th>Balance</th></tr></thead><tbody>';let bal=b;for(let i=1;i<=4;i++){bal+=wNA;h+=`<tr><td>Week ${i}</td><td class="tg">+${fmt(wr)}</td><td class="tr">-${fmt(wExp)}</td><td style="color:${wNet>=0?'var(--grn)':'var(--red)'}">${fmt(wNet)}</td><td style="font-weight:700;color:${bal>=0?'var(--acc)':'var(--red)'}">${fmt(bal)}</td></tr>`;}$('cf-time').innerHTML=h+'</tbody></table>';}
-function rScore(){const rev=DB.sett.reduce((a,x)=>a+(x.gross||0),0),ded=DB.ded.reduce((a,x)=>a+(x.amount||0),0),mi=DB.sett.reduce((a,x)=>a+(x.miles||0),0),fuel=DB.fuel.tr.reduce((a,x)=>a+(x.amount||0)-(x.discount||0),0)+DB.fuel.re.reduce((a,x)=>a+(x.amount||0)-(x.discount||0),0);if(!rev||!mi){$('sc-score').textContent='—';$('sc-grade').textContent='Import PDF to calculate';$('sc-kpis').innerHTML='<div class="empty">Import PDF</div>';return;}const rpm=rev/mi,fpm=fuel/mi,npm=(rev-ded)/mi;let s=0;if(rpm>=2.5)s+=25;else if(rpm>=2.0)s+=20;else if(rpm>=1.7)s+=12;else s+=5;if(fpm<=0.5)s+=25;else if(fpm<=0.65)s+=18;else if(fpm<=0.8)s+=10;else s+=3;if(npm>=0.8)s+=25;else if(npm>=0.6)s+=18;else if(npm>=0.4)s+=10;else s+=3;if(mi>0)s+=15;s=Math.min(100,Math.round(s));const g=s>=90?'Excellent 🏆':s>=75?'Good 👍':s>=60?'Average ⚠️':'Needs Work 🔧';$('sc-score').textContent=s;$('sc-score').style.color=s>=75?'var(--grn)':s>=60?'var(--org)':'var(--red)';$('sc-grade').textContent=g;$('sc-kpis').innerHTML=`<div class="osr"><span>Revenue/Mile</span><span style="color:${rpm>=2.0?'var(--grn)':'var(--org)'}; font-weight:600">${fmt(rpm)}</span></div><div class="osr"><span>Fuel/Mile</span><span style="color:${fpm<=0.65?'var(--grn)':'var(--red)'};font-weight:600">${fmt(fpm)}</span></div><div class="osr"><span>Net/Mile</span><span style="color:${npm>=0.6?'var(--grn)':'var(--org)'};font-weight:600">${fmt(npm)}</span></div><div class="osr tot"><span>Score</span><span style="color:${s>=75?'var(--grn)':s>=60?'var(--org)':'var(--red)'};font-size:15px">${s}/100</span></div>`;}
+function rScore(){const rev=DB.sett.reduce((a,x)=>a+(x.gross||0),0),ded=dedTotal(),mi=DB.sett.reduce((a,x)=>a+(x.miles||0),0),fuel=DB.fuel.tr.reduce((a,x)=>a+(x.amount||0)-(x.discount||0),0)+DB.fuel.re.reduce((a,x)=>a+(x.amount||0)-(x.discount||0),0);if(!rev||!mi){$('sc-score').textContent='—';$('sc-grade').textContent='Import PDF to calculate';$('sc-kpis').innerHTML='<div class="empty">Import PDF</div>';return;}const rpm=rev/mi,fpm=fuel/mi,npm=(rev-ded)/mi;let s=0;if(rpm>=2.5)s+=25;else if(rpm>=2.0)s+=20;else if(rpm>=1.7)s+=12;else s+=5;if(fpm<=0.5)s+=25;else if(fpm<=0.65)s+=18;else if(fpm<=0.8)s+=10;else s+=3;if(npm>=0.8)s+=25;else if(npm>=0.6)s+=18;else if(npm>=0.4)s+=10;else s+=3;if(mi>0)s+=15;s=Math.min(100,Math.round(s));const g=s>=90?'Excellent 🏆':s>=75?'Good 👍':s>=60?'Average ⚠️':'Needs Work 🔧';$('sc-score').textContent=s;$('sc-score').style.color=s>=75?'var(--grn)':s>=60?'var(--org)':'var(--red)';$('sc-grade').textContent=g;$('sc-kpis').innerHTML=`<div class="osr"><span>Revenue/Mile</span><span style="color:${rpm>=2.0?'var(--grn)':'var(--org)'}; font-weight:600">${fmt(rpm)}</span></div><div class="osr"><span>Fuel/Mile</span><span style="color:${fpm<=0.65?'var(--grn)':'var(--red)'};font-weight:600">${fmt(fpm)}</span></div><div class="osr"><span>Net/Mile</span><span style="color:${npm>=0.6?'var(--grn)':'var(--org)'};font-weight:600">${fmt(npm)}</span></div><div class="osr tot"><span>Score</span><span style="color:${s>=75?'var(--grn)':s>=60?'var(--org)':'var(--red)'};font-size:15px">${s}/100</span></div>`;}
 function rLoanc(){const t=LOANS.reduce((a,x)=>a+(x.balance||0),0),w=LOANS.filter(x=>x.freq==='Weekly').reduce((a,x)=>a+(x.payment||0),0),m=LOANS.filter(x=>x.freq==='Monthly').reduce((a,x)=>a+(x.payment||0),0)+w*4.33;$('lc-tot').textContent=fmt(t);$('lc-wk').textContent=fmt(w);$('lc-mo').textContent=fmt(m);if(!LOANS.length){$('lc-tbl').innerHTML='<div class="empty">No loans yet</div>';return;}$('lc-tbl').innerHTML='<table><thead><tr><th>Name</th><th>Balance</th><th>Payment</th><th>Freq</th><th>APR</th><th>Next Due</th><th></th></tr></thead><tbody>'+LOANS.map((x,i)=>`<tr><td style="font-weight:600">${x.name}</td><td class="tr">${fmt(x.balance)}</td><td>${fmt(x.payment)}</td><td class="tm">${x.freq}</td><td class="tm">${x.apr||0}%</td><td style="color:var(--org)">${x.due||'—'}</td><td><button onclick="delLoan(${i})" style="background:none;border:1px solid var(--red);color:var(--red);padding:1px 6px;border-radius:4px;font-size:10px;cursor:pointer">✕</button></td></tr>`).join('')+'</tbody></table>';}
 function addLoan(){$('ln-n').focus();}
 function saveLoan(){
@@ -2240,7 +2244,7 @@ function saveEquipEdit(i,btn){
   rAreg();rDash();
 }
 function rAcct(){
-  const rev=DB.sett.reduce((a,x)=>a+(x.gross||0),0),ded=DB.ded.reduce((a,x)=>a+(x.amount||0),0);
+  const rev=DB.sett.reduce((a,x)=>a+(x.gross||0),0),ded=dedTotal();
   $('ap-rev').textContent=fmt(rev);$('ap-ded').textContent=fmt(ded);$('ap-net').textContent=fmt(rev-ded);
   $('ap-net').style.color=(rev-ded)>=0?'var(--grn)':'var(--red)';$('ap-cnt').textContent=DB.sett.length;
 
@@ -2277,7 +2281,7 @@ function rAcct(){
     Object.entries(ec).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<div class="osr"><span>${k}</span><span class="${k.includes('Per Diem')?'tg':'tr'}">${fmt(v)}</span></div>`).join('')+`<div class="osr tot"><span>Total Deductions + Per Diem</span><span class="tr">${fmt(ded+pdAmt)}</span></div>`
     :'<div class="empty">Import PDF settlements</div>';
 }
-function genPkg(){const rev=DB.sett.reduce((a,x)=>a+(x.gross||0),0),ded=DB.ded.reduce((a,x)=>a+(x.amount||0),0);const assetCount=DB.ded.filter(x=>x.code==='EQUIP').length;const blob=new Blob([JSON.stringify({generated:new Date().toISOString(),company:'Graywolf Logistics LLC',owner:'Ali Bozkurt',year:2026,income:{grossRevenue:rev,deductions:ded,net:rev-ded,settlements:DB.sett.length},loans:LOANS,cards:CARDS,assets:assetCount,capitalContributions:CAPITAL.extraContributions,ownerDraws:CAPITAL.draws,rawData:DB},null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='graywolf-2026-accountant.json';a.click();URL.revokeObjectURL(url);alert('✅ Done!');}
+function genPkg(){const rev=DB.sett.reduce((a,x)=>a+(x.gross||0),0),ded=dedTotal();const assetCount=DB.ded.filter(x=>x.code==='EQUIP').length;const blob=new Blob([JSON.stringify({generated:new Date().toISOString(),company:'Graywolf Logistics LLC',owner:'Ali Bozkurt',year:2026,income:{grossRevenue:rev,deductions:ded,net:rev-ded,settlements:DB.sett.length},loans:LOANS,cards:CARDS,assets:assetCount,capitalContributions:CAPITAL.extraContributions,ownerDraws:CAPITAL.draws,rawData:DB},null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='graywolf-2026-accountant.json';a.click();URL.revokeObjectURL(url);alert('✅ Done!');}
 
 // ═══ SETTINGS ═══
 function getKey(){return localStorage.getItem('gw_apikey')||'';}
@@ -2511,7 +2515,7 @@ function clearFinancialData(){
 
 // ═══ AI ADVISOR ═══
 const aiHist=[];
-function aiCtx(){const rev=DB.sett.reduce((a,x)=>a+(x.gross||0),0),ded=DB.ded.reduce((a,x)=>a+(x.amount||0),0),mi=DB.sett.reduce((a,x)=>a+(x.miles||0),0);return`You are the AI business advisor for Ali Bozkurt, owner-operator of Graywolf Logistics LLC. Unit 830157 (2023 International LT), Prime Inc.\nRevenue: $${rev.toFixed(2)} | Deductions: $${ded.toFixed(2)} | Net: $${(rev-ded).toFixed(2)}\nMiles: ${mi.toLocaleString()} | Settlements: ${DB.sett.length}\nGive specific, actionable trucking advice. Max 150 words.`;}
+function aiCtx(){const rev=DB.sett.reduce((a,x)=>a+(x.gross||0),0),ded=dedTotal(),mi=DB.sett.reduce((a,x)=>a+(x.miles||0),0);return`You are the AI business advisor for Ali Bozkurt, owner-operator of Graywolf Logistics LLC. Unit 830157 (2023 International LT), Prime Inc.\nRevenue: $${rev.toFixed(2)} | Deductions: $${ded.toFixed(2)} | Net: $${(rev-ded).toFixed(2)}\nMiles: ${mi.toLocaleString()} | Settlements: ${DB.sett.length}\nGive specific, actionable trucking advice. Max 150 words.`;}
 async function sendAI(){const inp=$('ai-inp'),q=inp.value.trim();if(!q)return;inp.value='';const msgs=$('ai-msgs');msgs.innerHTML+=`<div style="margin-bottom:8px"><b style="color:var(--acc)">You:</b> ${q}</div>`;msgs.innerHTML+=`<div id="ait" style="color:var(--mut);font-style:italic">🤖 Thinking...</div>`;msgs.scrollTop=msgs.scrollHeight;aiHist.push({role:'user',content:q});const k=getKey();if(!k){$('ait').outerHTML='<div style="color:var(--red);margin-bottom:8px">❌ No API key. Go to Settings first.</div>';return;}try{const resp=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json','x-api-key':k,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:400,system:aiCtx(),messages:aiHist.slice(-6)})});const data=await resp.json();const ans=data.content?data.content.map(i=>i.text||'').join(''):'No response';aiHist.push({role:'assistant',content:ans});$('ait').outerHTML=`<div style="margin-bottom:10px;padding:8px;background:var(--card2);border-radius:7px;font-size:12px"><b style="color:var(--grn)">🤖 Advisor:</b><br>${ans.replace(/\n/g,'<br>')}</div>`;msgs.scrollTop=msgs.scrollHeight;}catch(err){$('ait').outerHTML=`<div style="color:var(--red)">Error: ${err.message}</div>`;}}
 function aiQ(q){$('ai-inp').value=q;sendAI();}
 
@@ -2627,7 +2631,7 @@ Return ONLY JSON.`;
 
 async function handleFile(file){
   if(window._checkingMode){await importCheckingStatement(file);return;}
-  if(window._bankStmtMode){await importBankStatement(file);return;}if(!file)return;$('dz').style.display='none';$('progbox').style.display='block';$('rprev').style.display='none';const st=$('steps');st.innerHTML='';for(let i=0;i<STEPS.length-1;i++){await new Promise(r=>setTimeout(r,250));st.innerHTML+=`<div class="pstep"><div class="dot ok">✓</div><span>${STEPS[i]}</span></div>`;}st.innerHTML+=`<div class="pstep"><div class="dot sp"></div><span>${STEPS[STEPS.length-1]}</span></div>`;try{const b64=await toB64(file);const isImg=file.type.startsWith('image/');const mt=file.type||'application/pdf';const prompt=`Parse this document for Graywolf Logistics LLC (Ali Bozkurt, Prime Inc. owner-operator, Unit 830157). Return ONLY raw JSON starting with { ending with }. No markdown.\n\ndocType: settlement|fuel|maintenance|amazon|store|toll|loan|other\n\nFor settlement: {"docType":"settlement","date":"YYYY-MM-DD","vendor":"","totalAmount":0,"taxDeductible":true,"bizPct":100,"summary":"","settlement":{"weekEnding":"","carrier":"","unit":"","grossRevenue":0,"reimbursements":0,"totalDeductions":0,"netPay":0,"totalMiles":0,"loadedMiles":0,"revenueItems":[{"desc":"","order":"","amount":0}],"reimbursementItems":[{"desc":"","ref":"","amount":0}],"loads":[{"order":"","from":"","to":"","pickupDate":"YYYY-MM-DD","deliveryDate":"YYYY-MM-DD","loadedMiles":0,"emptyMiles":0,"revenue":0,"rate":0,"shipper":""}],"tractorFuel":[{"date":"","location":"","gallons":0,"amount":0,"discount":0}],"reeferFuel":[{"date":"","location":"","gallons":0,"amount":0,"discount":0}],"deductions":[{"code":"","desc":"","balance":0,"amount":0,"category":"Software & Subscriptions|Legal & Accounting Fees|Insurance|Licensing & Permits|Fixed|Variable|Other"}],"maintenance":[{"invoice":"","unit":"","desc":"","odometer":0,"serviceType":"oil|fuel|valve|dpf|def|coolext|coolant|trans|tires|brakes|general|other","parts":0,"labor":0,"total":0,"covered":0}],"tolls":{"ezpass":{"total":0,"items":[]},"drivewyze":{"total":0,"items":[]}},"loans":[{"name":"","balance":0,"payment":0,"frequency":"","nextDue":""}],"assets":{"tractor":{"unit":"","year":"","make":"","model":"","vin":"","license":"","odometer":0},"apu":{"unit":"","make":"","model":"","vin":"","hours":0,"rental":0}},"operating":{"ytdRevenue":0,"ytdExpenses":0,"ytdNet":0,"weeksInService":0}}}\n\nFor fuel: {"docType":"fuel","date":"","vendor":"","totalAmount":0,"taxDeductible":true,"summary":"","fuel":{"type":"tractor","station":"","location":"","gallons":0,"pricePerGallon":0,"gross":0,"discount":0,"net":0}}\n\nFor maintenance: {"docType":"maintenance","date":"","vendor":"","totalAmount":0,"taxDeductible":true,"summary":"","maintenance":{"invoice":"","shop":"","unit":"","description":"","odometer":0,"serviceType":"oil|fuel|valve|dpf|def|coolext|coolant|trans|tires|brakes|general|other","parts":0,"labor":0,"total":0,"warrantyCredit":0,"netCost":0}}\n\n
+  if(window._bankStmtMode){await importBankStatement(file);return;}if(!file)return;$('dz').style.display='none';$('progbox').style.display='block';$('rprev').style.display='none';const st=$('steps');st.innerHTML='';for(let i=0;i<STEPS.length-1;i++){await new Promise(r=>setTimeout(r,250));st.innerHTML+=`<div class="pstep"><div class="dot ok">✓</div><span>${STEPS[i]}</span></div>`;}st.innerHTML+=`<div class="pstep"><div class="dot sp"></div><span>${STEPS[STEPS.length-1]}</span></div>`;try{const b64=await toB64(file);const isImg=file.type.startsWith('image/');const mt=file.type||'application/pdf';const prompt=`Parse this document for Graywolf Logistics LLC (Ali Bozkurt, Prime Inc. owner-operator, Unit 830157). Return ONLY raw JSON starting with { ending with }. No markdown.\n\ndocType: settlement|fuel|maintenance|amazon|store|toll|loan|other\n\nFor settlement: {"docType":"settlement","date":"YYYY-MM-DD","vendor":"","totalAmount":0,"taxDeductible":true,"bizPct":100,"summary":"","settlement":{"weekEnding":"","carrier":"","unit":"","grossRevenue":0,"reimbursements":0,"totalDeductions":0,"netPay":0,"totalMiles":0,"loadedMiles":0,"revenueItems":[{"desc":"","order":"","amount":0}],"reimbursementItems":[{"desc":"","ref":"","amount":0}],"loads":[{"order":"","from":"","to":"","pickupDate":"YYYY-MM-DD","deliveryDate":"YYYY-MM-DD","loadedMiles":0,"emptyMiles":0,"revenue":0,"rate":0,"shipper":""}],"tractorFuel":[{"date":"","location":"","gallons":0,"amount":0,"discount":0}],"reeferFuel":[{"date":"","location":"","gallons":0,"amount":0,"discount":0}],"deductions":[{"code":"","desc":"","balance":0,"amount":0,"category":"Software & Subscriptions|Legal & Accounting Fees|Insurance|Licensing & Permits|Fixed|Variable|Advance Repayment|Other","taxDeductible":true}],"maintenance":[{"invoice":"","unit":"","desc":"","odometer":0,"serviceType":"oil|fuel|valve|dpf|def|coolext|coolant|trans|tires|brakes|general|other","parts":0,"labor":0,"total":0,"covered":0}],"tolls":{"ezpass":{"total":0,"items":[]},"drivewyze":{"total":0,"items":[]}},"loans":[{"name":"","balance":0,"payment":0,"frequency":"","nextDue":""}],"assets":{"tractor":{"unit":"","year":"","make":"","model":"","vin":"","license":"","odometer":0},"apu":{"unit":"","make":"","model":"","vin":"","hours":0,"rental":0}},"operating":{"ytdRevenue":0,"ytdExpenses":0,"ytdNet":0,"weeksInService":0}}}\n\nSETTLEMENT FUEL RULES (strict): tractorFuel/reeferFuel arrays are ONLY for lines explicitly labeled TRACTOR FUEL / TRACTOR DEF / REEFER FUEL with gallons purchased. NEVER put these in fuel arrays: ADVANCE, ADV FOR OUTSIDE LUMPER, CASH ADVANCE, COMPANY STORE, or any advance/repayment line - those belong in deductions[] with their exact description (a lumper advance is money advanced to pay a lumper, NOT fuel, even when it shares the same station/location code as fuel lines). REEF FUEL DSCNT / fuel discount lines are the discount field of the matching fuel purchase, not separate rows.\n\nADVANCE RULES (critical, prevents double-counting): the settlement REIMBURSEMENT section is a generic CREDITS section - PERSONAL PAYMNT lines are the owner's own money sent in (not income) and ADVANCE lines there are loans issued (not income); still list them in reimbursementItems with exact desc. In the DEDUCTION section, plain ADVANCE repayment lines (desc ADVANCE, usually showing a remaining balance, e.g. weekly $500 repaying an EXT WARRANTY PURCHASE advance or a company-store advance) are LOAN PRINCIPAL REPAYMENTS, NOT expenses: set their category to "Advance Repayment" and add "taxDeductible":false on that deduction item - the real expense is the purchase line itself (e.g. EXTEND WR PURCH). Exception: ADV FOR OUTSIDE LUMPER is the actual lumper payment (deductible expense, matches the OUTSIDE LUMPER income line) - keep it deductible.\n\nFor fuel: {"docType":"fuel","date":"","vendor":"","totalAmount":0,"taxDeductible":true,"summary":"","fuel":{"type":"tractor","station":"","location":"","gallons":0,"pricePerGallon":0,"gross":0,"discount":0,"net":0}}\n\nFor maintenance: {"docType":"maintenance","date":"","vendor":"","totalAmount":0,"taxDeductible":true,"summary":"","maintenance":{"invoice":"","shop":"","unit":"","description":"","odometer":0,"serviceType":"oil|fuel|valve|dpf|def|coolext|coolant|trans|tires|brakes|general|other","parts":0,"labor":0,"total":0,"warrantyCredit":0,"netCost":0}}\n\n
 For amazon/walmart/homedepot/harborfright/store receipts use docType "amazon" (this is just an internal category name covering ALL store purchases, not literally Amazon):
 {"docType":"amazon","date":"","vendor":"","totalAmount":0,"taxDeductible":true,"bizPct":100,"summary":"","purchase":{"orderNumber":"","items":[{"name":"","qty":1,"price":0,"warrantyYears":null,"warrantyFor":null}],"subtotal":0,"tax":0,"total":0,"paymentMethod":"Business Credit Card"}}
 IMPORTANT: "vendor" MUST be the ACTUAL store/company name read from the document (logo, header, footer, or website URL shown) — e.g. "Home Depot", "Walmart", "AutoZone", "Amazon.com". Never default to "Amazon" unless the receipt genuinely is from Amazon. If a photo is blurry and the name truly cannot be read, set vendor to "Unknown Store" rather than guessing a specific brand.
@@ -3037,7 +3041,7 @@ function rBankStmt(){
       <td>${x.deductible?'<span class="badge bg">Yes</span>':'<span class="badge br">No</span>'}</td>
     </tr>`).join('')+'</tbody></table>';
   if($('bs-cross-check'))$('bs-cross-check').style.display='block';
-  const settDeds=DB.ded.reduce((a,x)=>a+(x.amount||0),0);
+  const settDeds=dedTotal();
   if($('bs-cross-content'))$('bs-cross-content').innerHTML=`
     <div class="osr"><span>Card Total Spent</span><span class="tr">${fmt(spent)}</span></div>
     <div class="osr"><span>Card Deductible</span><span class="tg">${fmt(ded)}</span></div>
@@ -3184,6 +3188,33 @@ window.addEventListener('load',()=>{
       }
     });
     if(recat>0){saveDB();console.log('Re-categorized',recat,'mis-bucketed rows');}
+    // Pass 4 (2026-07-17): lumper/cash advances mis-filed as fuel (AI grouped
+    // "ADV FOR OUTSIDE LUMPER" with reefer-fuel lines sharing the same station
+    // code). Move them out of fuel into settlement-withheld deductions.
+    let advFix=0;
+    const advRe=/lumper|advance|\badv\b/i;
+    ['re','tr'].forEach(k=>{
+      const keep=[];
+      (DB.fuel[k]||[]).forEach(f=>{
+        const txt=[f.location,f.desc,f.description,f.note].filter(Boolean).join(' ');
+        if((!f.gallons||f.gallons===0)&&(f.amount||0)>0&&advRe.test(txt)){
+          DB.ded.push({id:uid(),_batch:f._batch,date:f.date,source:'settlement',payment:'Settlement Withheld',category:'Variable',desc:(txt.trim()||'Advance')+' — lumper/cash advance (moved from fuel)',amount:f.amount,taxDeductible:true,bizPct:100});
+          advFix++;
+        }else keep.push(f);
+      });
+      DB.fuel[k]=keep;
+    });
+    if(advFix>0){saveDB();console.log('Moved',advFix,'advance/lumper rows out of fuel');}
+    // Pass 5 (2026-07-17): settlement ADVANCE repayment rows (weekly $500 warranty
+    // advance, company-store advance, etc.) are loan principal, not expenses — the
+    // purchase line was already expensed. Mark them non-deductible.
+    let advRep=0;
+    DB.ded.forEach(x=>{
+      if(x.source==='settlement'&&x.taxDeductible!==false&&/\badvance\b/i.test(x.desc||'')&&!/lumper/i.test(x.desc||'')){
+        x.taxDeductible=false;x.category='Advance Repayment';advRep++;
+      }
+    });
+    if(advRep>0){saveDB();console.log('Marked',advRep,'advance repayments non-deductible');}
   }catch(e){console.error('tax-merge:',e);}
   // One-time migration: older imports didn't tag settlement-withheld deductions. Any deduction
   // whose date matches a settlement AND has no payment/source info is treated as withheld.
