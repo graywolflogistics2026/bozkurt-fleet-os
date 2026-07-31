@@ -2851,10 +2851,10 @@ function pPayHint(){
   if(sel&&h)h.textContent=isPersonalPayment(sel.value)?'\u2192 Capital Contribution (will ask)':'';
 }
 async function saveImport(){
-  if(pendingDoc&&pendingDoc.date)pendingDoc.date=fixDocDate(pendingDoc.date);
   if(guardReadOnly())return;
   if(!PENDING)return;
   const d=PENDING;
+  if(d.date)d.date=fixDocDate(d.date);
   PENDING=null; // claim immediately — a double-click on Save can't process the same doc twice
   const dt=d.docType||'other';
   const _dupe=checkDuplicateImport(d);
