@@ -144,7 +144,7 @@ canvas{max-height:160px;}
     <div class="ni" onclick="go('settings',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M5.64 5.64a10 10 0 0 1 0 13.13"/></svg>Settings</div>
   </div>
   <div class="suser"><div class="sav">AB</div><div class="sui">Ali Bozkurt<small>Graywolf Logistics</small></div></div>
-  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.07.17-E</div>
+  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.08.02-B</div>
 </div>
 <div id="main">
   <div id="readonly-banner" style="display:none;background:var(--org);color:#000;padding:6px 18px;align-items:center;gap:8px;font-size:12px;font-weight:600">👀 View-Only Mode — you're looking, not editing. Ask the owner for changes.</div>
@@ -1354,6 +1354,39 @@ function fixDocDate(s){
     return swapped+'-'+String(m).padStart(2,'0')+'-'+String(y-2000).padStart(2,'0');
   }
   return s;
+}
+// Resolve an ambiguous YY/MM/DD week-ending using the statement's unambiguous
+// printed DATE (M/D/YY) as an anchor: the correct reading lands in
+// [printDate, printDate+7d]. Falls back to the plain year guard.
+// Weekly miles must not silently absorb an LTD/QTD figure: if the stated
+// weekly miles wildly exceed the sum of this week's loads, trust the loads.
+function sanitizeWeeklyMiles(s){
+  const stated=Number(s.totalMiles||0);
+  const loads=(s.loads||[]);
+  const loadMiles=loads.reduce((a,l)=>a+Number(l.loadedMiles||0)+Number(l.emptyMiles||0),0);
+  if(loads.length===0&&stated>0){console.warn('Settlement has no loads but claims '+stated+' miles — treating as 0 (LTD figure?)');return 0;}
+  if(loadMiles>0&&stated>loadMiles*1.5){console.warn('Weekly miles '+stated+' >> load miles '+loadMiles+' — using load miles');return loadMiles;}
+  return stated;
+}
+const ESCROW_RE=/perform\w*\s*bond|perf\s*bond|\bescrow\b|tire fund|emerg\w*\s*(fd|fund)|maint\w*\s*reserve|security deposit/i;
+function resolveWeekEnding(weekEnding,printDate){
+  if(!weekEnding)return weekEnding;
+  if(!printDate||!/^\d{4}-\d{2}-\d{2}$/.test(printDate))return fixDocDate(weekEnding);
+  const p=new Date(printDate+'T12:00:00');
+  if(isNaN(p))return fixDocDate(weekEnding);
+  const lo=p.getTime()-86400000, hi=p.getTime()+8*86400000;
+  const cands=[weekEnding];
+  const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(weekEnding);
+  if(m){
+    const y=+m[1],mo=m[2],d=+m[3];
+    const alt=(2000+d)+'-'+mo+'-'+String(y-2000).padStart(2,'0');
+    if(/^\d{4}-\d{2}-\d{2}$/.test(alt))cands.push(alt);
+  }
+  for(const cd of cands){
+    const t=new Date(cd+'T12:00:00').getTime();
+    if(!isNaN(t)&&t>=lo&&t<=hi)return cd;
+  }
+  return fixDocDate(weekEnding);
 }
 function dedTotal(){return DB.ded.reduce((a,x)=>a+(x.taxDeductible===false?0:(x.amount||0)),0);}
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,5);
@@ -2679,7 +2712,8 @@ Return ONLY JSON.`;
 
 async function handleFile(file){
   if(window._checkingMode){await importCheckingStatement(file);return;}
-  if(window._bankStmtMode){await importBankStatement(file);return;}if(!file)return;$('dz').style.display='none';$('progbox').style.display='block';$('rprev').style.display='none';const st=$('steps');st.innerHTML='';for(let i=0;i<STEPS.length-1;i++){await new Promise(r=>setTimeout(r,250));st.innerHTML+=`<div class="pstep"><div class="dot ok">✓</div><span>${STEPS[i]}</span></div>`;}st.innerHTML+=`<div class="pstep"><div class="dot sp"></div><span>${STEPS[STEPS.length-1]}</span></div>`;try{const b64=await toB64(file);const isImg=file.type.startsWith('image/');const mt=file.type||'application/pdf';const prompt=`Parse this document for Graywolf Logistics LLC (Ali Bozkurt, Prime Inc. owner-operator, Unit 830157). Return ONLY raw JSON starting with { ending with }. No markdown.\n\ndocType: settlement|fuel|maintenance|amazon|store|toll|loan|other\n\nFor settlement: {"docType":"settlement","date":"YYYY-MM-DD","vendor":"","totalAmount":0,"taxDeductible":true,"bizPct":100,"summary":"","settlement":{"weekEnding":"","carrier":"","unit":"","grossRevenue":0,"reimbursements":0,"totalDeductions":0,"netPay":0,"totalMiles":0,"loadedMiles":0,"revenueItems":[{"desc":"","order":"","amount":0}],"reimbursementItems":[{"desc":"","ref":"","amount":0}],"loads":[{"order":"","from":"","to":"","pickupDate":"YYYY-MM-DD","deliveryDate":"YYYY-MM-DD","loadedMiles":0,"emptyMiles":0,"revenue":0,"rate":0,"shipper":""}],"tractorFuel":[{"date":"","location":"","gallons":0,"amount":0,"discount":0}],"reeferFuel":[{"date":"","location":"","gallons":0,"amount":0,"discount":0}],"deductions":[{"code":"","desc":"","balance":0,"amount":0,"category":"Software & Subscriptions|Legal & Accounting Fees|Insurance|Licensing & Permits|Fixed|Variable|Advance Repayment|Other","taxDeductible":true}],"maintenance":[{"invoice":"","unit":"","desc":"","odometer":0,"serviceType":"oil|fuel|valve|dpf|def|coolext|coolant|trans|tires|brakes|general|other","parts":0,"labor":0,"total":0,"covered":0}],"tolls":{"ezpass":{"total":0,"items":[]},"drivewyze":{"total":0,"items":[]}},"loans":[{"name":"","balance":0,"payment":0,"frequency":"","nextDue":""}],"assets":{"tractor":{"unit":"","year":"","make":"","model":"","vin":"","license":"","odometer":0},"apu":{"unit":"","make":"","model":"","vin":"","hours":0,"rental":0}},"operating":{"ytdRevenue":0,"ytdExpenses":0,"ytdNet":0,"weeksInService":0}}}\n\nDATE RULES: some carriers print dates as YY/MM/DD (e.g. 26/07/17 means 2026-07-17). Always output ISO YYYY-MM-DD with a plausible year between 2020 and next year - never output a year like 2017 from a two-digit field.\n\nSETTLEMENT FUEL RULES (strict): tractorFuel/reeferFuel arrays are ONLY for lines explicitly labeled TRACTOR FUEL / TRACTOR DEF / REEFER FUEL with gallons purchased. NEVER put these in fuel arrays: ADVANCE, ADV FOR OUTSIDE LUMPER, CASH ADVANCE, COMPANY STORE, or any advance/repayment line - those belong in deductions[] with their exact description (a lumper advance is money advanced to pay a lumper, NOT fuel, even when it shares the same station/location code as fuel lines). REEF FUEL DSCNT / fuel discount lines are the discount field of the matching fuel purchase, not separate rows.\n\nADVANCE RULES (critical, prevents double-counting): the settlement REIMBURSEMENT section is a generic CREDITS section - PERSONAL PAYMNT lines are the owner's own money sent in (not income) and ADVANCE lines there are loans issued (not income); still list them in reimbursementItems with exact desc. In the DEDUCTION section, plain ADVANCE repayment lines (desc ADVANCE, usually showing a remaining balance, e.g. weekly $500 repaying an EXT WARRANTY PURCHASE advance or a company-store advance) are LOAN PRINCIPAL REPAYMENTS, NOT expenses: set their category to "Advance Repayment" and add "taxDeductible":false on that deduction item - the real expense is the purchase line itself (e.g. EXTEND WR PURCH). Exception: ADV FOR OUTSIDE LUMPER is the actual lumper payment (deductible expense, matches the OUTSIDE LUMPER income line) - keep it deductible.\n\nMEAL RULES: restaurant/cafe/food purchases (truck-stop restaurants, Prime point-of-sale meals, cafes, grills-as-restaurants, diners) are covered by the per-diem deduction and must NEVER be counted as separate expenses: set category "Meals (per diem covered)" and "taxDeductible":false on those lines (still list them - they are real withholdings). Do not confuse a restaurant grill with a truck grille part (vehicle part = deductible equipment).\n\nFor fuel: {"docType":"fuel","date":"","vendor":"","totalAmount":0,"taxDeductible":true,"summary":"","fuel":{"type":"tractor","station":"","location":"","gallons":0,"pricePerGallon":0,"gross":0,"discount":0,"net":0}}\n\nFor maintenance: {"docType":"maintenance","date":"","vendor":"","totalAmount":0,"taxDeductible":true,"summary":"","maintenance":{"invoice":"","shop":"","unit":"","description":"","odometer":0,"serviceType":"oil|fuel|valve|dpf|def|coolext|coolant|trans|tires|brakes|general|other","parts":0,"labor":0,"total":0,"warrantyCredit":0,"netCost":0}}\n\n
+  if(window._bankStmtMode){await importBankStatement(file);return;}if(!file)return;
+  if(file.size>10*1024*1024){alert('This file is '+(file.size/1048576).toFixed(1)+' MB — the limit is 10 MB.\n\nTry exporting a smaller PDF or splitting it into pages.');return;}$('dz').style.display='none';$('progbox').style.display='block';$('rprev').style.display='none';const st=$('steps');st.innerHTML='';for(let i=0;i<STEPS.length-1;i++){await new Promise(r=>setTimeout(r,250));st.innerHTML+=`<div class="pstep"><div class="dot ok">✓</div><span>${STEPS[i]}</span></div>`;}st.innerHTML+=`<div class="pstep"><div class="dot sp"></div><span>${STEPS[STEPS.length-1]}</span></div>`;try{const b64=await toB64(file);const isImg=file.type.startsWith('image/');const mt=file.type||'application/pdf';const prompt=`Parse this document for Graywolf Logistics LLC (Ali Bozkurt, Prime Inc. owner-operator, Unit 830157). Return ONLY raw JSON starting with { ending with }. No markdown.\n\ndocType: settlement|fuel|maintenance|amazon|store|toll|loan|other\n\nFor settlement: {"docType":"settlement","date":"YYYY-MM-DD","vendor":"","totalAmount":0,"taxDeductible":true,"bizPct":100,"summary":"","settlement":{"weekEnding":"","printDate":"YYYY-MM-DD","carrier":"","unit":"","grossRevenue":0,"reimbursements":0,"totalDeductions":0,"netPay":0,"totalMiles":0,"loadedMiles":0,"revenueItems":[{"desc":"","order":"","amount":0}],"reimbursementItems":[{"desc":"","ref":"","amount":0}],"loads":[{"order":"","from":"","to":"","pickupDate":"YYYY-MM-DD","deliveryDate":"YYYY-MM-DD","loadedMiles":0,"emptyMiles":0,"revenue":0,"rate":0,"shipper":""}],"tractorFuel":[{"date":"","location":"","gallons":0,"amount":0,"discount":0}],"reeferFuel":[{"date":"","location":"","gallons":0,"amount":0,"discount":0}],"deductions":[{"code":"","desc":"","balance":0,"amount":0,"category":"Software & Subscriptions|Legal & Accounting Fees|Insurance|Licensing & Permits|Fixed|Variable|Advance Repayment|Escrow & Deposits|Other","taxDeductible":true}],"maintenance":[{"invoice":"","unit":"","desc":"","odometer":0,"serviceType":"oil|fuel|valve|dpf|def|coolext|coolant|trans|tires|brakes|general|other","parts":0,"labor":0,"total":0,"covered":0}],"tolls":{"ezpass":{"total":0,"items":[]},"drivewyze":{"total":0,"items":[]}},"loans":[{"name":"","balance":0,"payment":0,"frequency":"","nextDue":""}],"assets":{"tractor":{"unit":"","year":"","make":"","model":"","vin":"","license":"","odometer":0},"apu":{"unit":"","make":"","model":"","vin":"","hours":0,"rental":0}},"operating":{"ytdRevenue":0,"ytdExpenses":0,"ytdNet":0,"weeksInService":0}}}\n\nDATE RULES (anchor method): carrier statements print TWO header dates - "SETTLEMENTS DATE: 26/07/17" (YY/MM/DD, ambiguous, this is the weekEnding) and "DATE: 7/16/26" (M/D/YY, unambiguous print date, usually 1 day BEFORE the settlement date). ALSO return the print date as settlement.printDate (ISO). Resolve weekEnding by choosing the reading of SETTLEMENTS DATE that falls within [printDate, printDate+7 days] and shares its year: printDate 2026-07-16 + "26/07/17" = 2026-07-17 (never 2017-07-26, never 2024-07-26). If no reading fits, leave weekEnding empty. Never invent a date from today. All other dates: ISO YYYY-MM-DD, plausible year 2020..next year.\n\nSETTLEMENT FUEL RULES (strict): tractorFuel/reeferFuel arrays are ONLY for lines explicitly labeled TRACTOR FUEL / TRACTOR DEF / REEFER FUEL with gallons purchased. NEVER put these in fuel arrays: ADVANCE, ADV FOR OUTSIDE LUMPER, CASH ADVANCE, COMPANY STORE, or any advance/repayment line - those belong in deductions[] with their exact description (a lumper advance is money advanced to pay a lumper, NOT fuel, even when it shares the same station/location code as fuel lines). REEF FUEL DSCNT / fuel discount lines are the discount field of the matching fuel purchase, not separate rows.\n\nADVANCE RULES (critical, prevents double-counting): the settlement REIMBURSEMENT section is a generic CREDITS section - PERSONAL PAYMNT lines are the owner's own money sent in (not income) and ADVANCE lines there are loans issued (not income); still list them in reimbursementItems with exact desc. In the DEDUCTION section, plain ADVANCE repayment lines (desc ADVANCE, usually showing a remaining balance, e.g. weekly $500 repaying an EXT WARRANTY PURCHASE advance or a company-store advance) are LOAN PRINCIPAL REPAYMENTS, NOT expenses: set their category to "Advance Repayment" and add "taxDeductible":false on that deduction item - the real expense is the purchase line itself (e.g. EXTEND WR PURCH). Exception: ADV FOR OUTSIDE LUMPER is the actual lumper payment (deductible expense, matches the OUTSIDE LUMPER income line) - keep it deductible.\n\nMILES RULE (critical): use ONLY this week\'s miles from the revenue section totals. NEVER use "LTD MILES" (lifetime), "MILES QTD" (quarter) or any YTD figure - a week with no loads has totalMiles 0 even when LTD MILES prints 445.\n\nNET PAY RULE: netPay is SIGNED. A week can be NEGATIVE (deductions exceed revenue - "NET AMOUNT DUE UNIT: 1,155.35-" or a trailing minus means the owner OWES the carrier). Output it as a negative number, never as a positive or zero.\n\nESCROW RULE: performance bond, escrow, tire fund, emergency fund, maintenance reserve deductions are REFUNDABLE DEPOSITS held by the carrier (they appear under the carrier\'s receivables), NOT expenses: set category "Escrow & Deposits" and "taxDeductible":false.\n\nMEAL RULES: restaurant/cafe/food purchases (truck-stop restaurants, Prime point-of-sale meals, cafes, grills-as-restaurants, diners) are covered by the per-diem deduction and must NEVER be counted as separate expenses: set category "Meals (per diem covered)" and "taxDeductible":false on those lines (still list them - they are real withholdings). Do not confuse a restaurant grill with a truck grille part (vehicle part = deductible equipment).\n\nFor fuel: {"docType":"fuel","date":"","vendor":"","totalAmount":0,"taxDeductible":true,"summary":"","fuel":{"type":"tractor","station":"","location":"","gallons":0,"pricePerGallon":0,"gross":0,"discount":0,"net":0}}\n\nFor maintenance: {"docType":"maintenance","date":"","vendor":"","totalAmount":0,"taxDeductible":true,"summary":"","maintenance":{"invoice":"","shop":"","unit":"","description":"","odometer":0,"serviceType":"oil|fuel|valve|dpf|def|coolext|coolant|trans|tires|brakes|general|other","parts":0,"labor":0,"total":0,"warrantyCredit":0,"netCost":0}}\n\n
 For amazon/walmart/homedepot/harborfright/store receipts use docType "amazon" (this is just an internal category name covering ALL store purchases, not literally Amazon):
 {"docType":"amazon","date":"","vendor":"","totalAmount":0,"taxDeductible":true,"bizPct":100,"summary":"","purchase":{"orderNumber":"","items":[{"name":"","qty":1,"price":0,"warrantyYears":null,"warrantyFor":null}],"subtotal":0,"tax":0,"total":0,"paymentMethod":"Business Credit Card"}}
 IMPORTANT: "vendor" MUST be the ACTUAL store/company name read from the document (logo, header, footer, or website URL shown) — e.g. "Home Depot", "Walmart", "AutoZone", "Amazon.com". Never default to "Amazon" unless the receipt genuinely is from Amazon. If a photo is blurry and the name truly cannot be read, set vendor to "Unknown Store" rather than guessing a specific brand.
@@ -2867,9 +2901,14 @@ async function saveImport(){
     // batch tag ('sett-'+weekEnding); if that batch already exists, its rows are
     // removed first — so numbers (revenue, weeks, per diem) stay identical no
     // matter how many times the same PDF is imported.
+    if(s.weekEnding)s.weekEnding=resolveWeekEnding(s.weekEnding,s.printDate||'');
+    s.totalMiles=sanitizeWeeklyMiles(s);
+    (s.deductions||[]).forEach(x=>{if(ESCROW_RE.test(x.desc||'')){x.category='Escrow & Deposits';x.taxDeductible=false;}});
     const wk=s.weekEnding||d.date;
+    if(!wk){alert('This settlement has no week-ending date — cannot save. Check the document.');PENDING=d;return;}
     const batch='sett-'+wk;
-    const hadOld=DB.sett.some(x=>x._batch===batch||x.weekEnding===wk||(!x.weekEnding&&x.date===d.date));
+    const _prevSett=DB.sett.find(x=>x._batch===batch||x.weekEnding===wk||(!x.weekEnding&&x.date===d.date))||null;
+    const hadOld=!!_prevSett;
     if(hadOld){
       DB.sett=DB.sett.filter(x=>!(x._batch===batch||x.weekEnding===wk||(!x.weekEnding&&x.date===d.date)));
       DB.loads=DB.loads.filter(x=>!(x._batch===batch||x.date===d.date));
@@ -2879,7 +2918,11 @@ async function saveImport(){
       DB.ded=DB.ded.filter(x=>!(x._batch===batch||(x.source==='settlement'&&x.date===d.date)));
       console.log('Settlement re-import: replaced existing week '+wk);
     }
-    DB.sett.push({id:uid(),_batch:batch,date:d.date,weekEnding:s.weekEnding,carrier:s.carrier,gross:s.grossRevenue,reimb:s.reimbursements,ded:s.totalDeductions,net:s.netPay,miles:s.totalMiles,revenueItems:s.revenueItems||[]});
+    // Remember what this week previously credited to the business balance so a
+    // corrected re-import applies only the DIFFERENCE (never double-credits,
+    // never silently drops a correction).
+    const prevCredit=_prevSett?(_prevSett.balCredit!==undefined?_prevSett.balCredit:(_prevSett.net||0)):0;
+    DB.sett.push({id:uid(),_batch:batch,date:d.date,weekEnding:s.weekEnding,carrier:s.carrier,gross:s.grossRevenue,reimb:s.reimbursements,ded:s.totalDeductions,net:s.netPay,balCredit:Number(s.netPay||0),miles:s.totalMiles,revenueItems:s.revenueItems||[]});
     (s.loads||[]).forEach(l=>{const pickupDate=l.pickupDate||l.date||d.date;const deliveryDate=l.deliveryDate||l.dropDate||null;DB.loads.push({id:uid(),_batch:batch,date:d.date,pickupDate,deliveryDate,...l});});
     (s.tractorFuel||[]).forEach(f=>DB.fuel.tr.push({id:uid(),_batch:batch,date:f.date||d.date,...f}));
     (s.reeferFuel||[]).forEach(f=>DB.fuel.re.push({id:uid(),_batch:batch,date:f.date||d.date,...f}));
@@ -2892,9 +2935,14 @@ async function saveImport(){
     if(s.assets?.tractor)DB.assets.tr=s.assets.tractor;
     if(s.assets?.apu)DB.assets.apu=s.assets.apu;
     if(s.operating)DB.op={...DB.op,...s.operating};
-    const currentBal=parseFloat(localStorage.getItem('gw_bizbal')||'60000');
-    const netPay=s.netPay||0;
-    if(netPay>0)localStorage.setItem('gw_bizbal',(currentBal+netPay).toString());
+    const currentBal=parseFloat(localStorage.getItem('gw_bizbal')||'0');
+    const netPay=Number(s.netPay||0); // SIGNED — a losing week must reduce the balance
+    const delta=netPay-prevCredit; // first import: prevCredit 0 → full net; re-import: only the correction
+    if(delta!==0){
+      localStorage.setItem('gw_bizbal',(currentBal+delta).toString());
+      if(hadOld)console.log('Re-import balance adjustment: '+(delta>0?'+':'')+delta.toFixed(2));
+    }
+    window._lastBalDelta=delta;
   }else if(dt==='fuel'&&d.fuel){
     const f=d.fuel;const rec={id:uid(),date:d.date,location:f.station,gallons:f.gallons,amount:f.gross,discount:f.discount};
     if(f.type==='reefer')DB.fuel.re.push(rec);else DB.fuel.tr.push(rec);
@@ -2961,7 +3009,7 @@ async function saveImport(){
   }
   autoBackupToDrive(); // fire-and-forget: keep a fresh full JSON backup in Drive/Backups
   closePDF();go('dash',document.querySelector('.ni.on'));
-  const _nm=dt==='settlement'&&d.settlement?'\n💰 Balance +'+fmt(d.settlement.netPay||0):'';
+  const _nm=dt==='settlement'&&d.settlement?'\n💰 Balance '+(window._lastBalDelta>=0?'+':'')+fmt(window._lastBalDelta||0):'';
   const _contribMsg=d._contribTotal>0?'\n💰 Added as a Capital Account contribution: '+fmt(d._contribTotal)+' (paid from personal funds)':'';
   const _fileMsg=_drive?'\n☁️ Uploaded to Google Drive → '+_folderLabel+'/':(_saved?'\n📁 PDF saved to '+_folderLabel+'/ folder':'');
   alert('✅ Saved to system!'+_nm+_contribMsg+_fileMsg);
@@ -3287,6 +3335,15 @@ window.addEventListener('load',()=>{
       }
     });
     if(mealFix>0){saveDB();console.log('Marked',mealFix,'meal lines as per-diem covered (non-deductible)');}
+    // Pass 7 (2026-08-02): performance bond / escrow / tire fund are refundable
+    // deposits held by the carrier, not deductible expenses.
+    let escFix=0;
+    DB.ded.forEach(x=>{
+      if(x.source==='settlement'&&x.taxDeductible!==false&&ESCROW_RE.test(x.desc||'')){
+        x.taxDeductible=false;x.category='Escrow & Deposits';escFix++;
+      }
+    });
+    if(escFix>0){saveDB();console.log('Marked',escFix,'escrow/bond lines as refundable deposits');}
   }catch(e){console.error('tax-merge:',e);}
   // One-time migration: older imports didn't tag settlement-withheld deductions. Any deduction
   // whose date matches a settlement AND has no payment/source info is treated as withheld.
