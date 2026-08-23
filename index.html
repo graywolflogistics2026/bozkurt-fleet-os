@@ -144,7 +144,7 @@ canvas{max-height:160px;}
     <div class="ni" onclick="go('settings',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M5.64 5.64a10 10 0 0 1 0 13.13"/></svg>Settings</div>
   </div>
   <div class="suser"><div class="sav">AB</div><div class="sui">Ali Bozkurt<small>Graywolf Logistics</small></div></div>
-  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.08.05-U</div>
+  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.08.05-W</div>
 </div>
 <div id="main">
   <div id="readonly-banner" style="display:none;background:var(--org);color:#000;padding:6px 18px;align-items:center;gap:8px;font-size:12px;font-weight:600">👀 View-Only Mode — you're looking, not editing. Ask the owner for changes.</div>
@@ -162,7 +162,7 @@ canvas{max-height:160px;}
     <div id="pg-dash" class="pg on">
       <div class="g4">
         <div class="sc"><div class="sl">Total Revenue</div><div class="sv tg" id="d-rev">$0.00</div><div class="sch">Import PDF to start</div></div>
-        <div class="sc"><div class="sl">Total Deductions</div><div class="sv tr" id="d-ded">$0.00</div></div>
+        <div class="sc" onclick="showExpenseMath()" style="cursor:pointer" title="Tap to see what's inside"><div class="sl">Total Deductions 🔍</div><div class="sv tr" id="d-ded">$0.00</div></div>
         <div class="sc"><div class="sl">Net to Owner</div><div class="sv" id="d-net">$0.00</div></div>
         <div class="sc" onclick="showMilesEditor()" style="cursor:pointer" title="Tap to edit miles"><div class="sl">Miles Driven ✏️</div><div class="sv" id="d-miles">0</div></div>
       </div>
@@ -1525,7 +1525,7 @@ function resolveWeekEnding(weekEnding,printDate){
 // over months, VARIABLE costs (fuel, maintenance, tires, tolls) are what you
 // actually spent. CPM = (fixed share + variable) ÷ miles for the same period.
 function getTruckCost(){
-  const d={purchasePrice:0,financing:'paid',loanAmount:0,monthlyPayment:0,termMonths:60,depreciationMonths:60,warrantyCost:0,warrantyMonths:36};
+  const d={purchasePrice:0,financing:'paid',loanAmount:0,monthlyPayment:0,termMonths:60,depreciationMonths:60,warrantyCost:0,warrantyMonths:36,taxMethod:'',placedInServiceYear:0,assetKind:'tractor',bizUsePct:100};
   try{return Object.assign(d,JSON.parse(localStorage.getItem('gw_truckcost')||'{}'));}catch(e){return d;}
 }
 function saveTruckCost(v){localStorage.setItem('gw_truckcost',JSON.stringify(v));}
@@ -1544,14 +1544,47 @@ function editTruckCost(){
   }else{
     depMonths=parseInt((prompt('Spread the truck cost over how many months? (typical 36-60)',t.depreciationMonths||60)||'').replace(/[^0-9]/g,''))||60;
   }
+  // Tax depreciation election — only meaningful when you OWN the truck. A lease
+  // operator deducts the payment itself, so we skip this for leases.
+  let taxMethod=t.taxMethod||'',placedYear=t.placedInServiceYear||0,kind=t.assetKind||'tractor';
+  if(fin!=='lease'&&price>0){
+    const m=(prompt('How do you want to depreciate it for TAXES?\n\n  full   = deduct the whole cost the first year (Section 179 / bonus)\n  macrs  = IRS schedule (tractor 3 years, trailer 5 years) — the default most CPAs use\n  spread = straight line over the months you set above\n  ask    = leave it out; my CPA will handle it',t.taxMethod||'macrs')||'').toLowerCase().trim();
+    taxMethod=['full','macrs','spread','ask'].includes(m)?m:'ask';
+    if(taxMethod!=='ask'){
+      placedYear=parseInt((prompt('Year you put it in service (e.g. 2026)',t.placedInServiceYear||new Date().getFullYear())||'').replace(/[^0-9]/g,''))||new Date().getFullYear();
+      kind=((prompt('Is it a tractor or a trailer?','tractor')||'tractor').toLowerCase().includes('trail'))?'trailer':'tractor';
+    }
+  }
   const wCost=parseFloat((prompt('Extended warranty / service contract cost ($, 0 if none)',t.warrantyCost||'0')||'').replace(/[^0-9.]/g,''))||0;
   const wMonths=wCost>0?(parseInt((prompt('Warranty term in months (e.g. 36)',t.warrantyMonths||36)||'').replace(/[^0-9]/g,''))||36):36;
   const mode=fin==='loan'?'loan':(fin==='lease'?'lease':'paid');
-  saveTruckCost({purchasePrice:price,financing:mode,loanAmount,monthlyPayment,termMonths,depreciationMonths:depMonths,warrantyCost:wCost,warrantyMonths:wMonths});
+  saveTruckCost({purchasePrice:price,financing:mode,loanAmount,monthlyPayment,termMonths,depreciationMonths:depMonths,warrantyCost:wCost,warrantyMonths:wMonths,taxMethod,placedInServiceYear:placedYear,assetKind:kind,bizUsePct:100});
   rAll();
   alert('✅ Saved. Your cost per mile now spreads these over time instead of dumping them into one month.');
 }
 // Months of activity covered by the imported settlements (weeks / 4.33).
+// IRS MACRS 200% declining balance, half-year convention — tractors are 3-year
+// property, trailers 5-year. "full" = Section 179 / bonus in year one.
+const MACRS={tractor:[0.3333,0.4445,0.1481,0.0741],trailer:[0.20,0.32,0.192,0.1152,0.1152,0.0576]};
+function taxDepreciationFor(year){
+  const t=getTruckCost();
+  if(t.financing==='lease')return {amount:0,label:'Lease payments are deducted directly — no depreciation.'};
+  if(!t.purchasePrice||!t.taxMethod||t.taxMethod==='ask')return {amount:0,label:''};
+  const y=Number(year)||new Date().getFullYear();
+  const idx=y-(t.placedInServiceYear||y);
+  if(idx<0)return {amount:0,label:''};
+  const basis=t.purchasePrice*((t.bizUsePct||100)/100);
+  if(t.taxMethod==='full'){
+    return idx===0?{amount:basis,label:'Section 179 / bonus — full cost deducted in '+t.placedInServiceYear}:{amount:0,label:'Fully deducted in '+t.placedInServiceYear};
+  }
+  if(t.taxMethod==='macrs'){
+    const tbl=MACRS[t.assetKind==='trailer'?'trailer':'tractor'];
+    const pct=tbl[idx]||0;
+    return {amount:basis*pct,label:'MACRS year '+(idx+1)+' of '+tbl.length+' ('+(pct*100).toFixed(2)+'% of '+fmt(basis)+')'};
+  }
+  const years=Math.max(1,(t.depreciationMonths||60)/12);
+  return idx<years?{amount:basis/years,label:'Straight line — '+fmt(basis)+' ÷ '+years.toFixed(1)+' years'}:{amount:0,label:'Fully depreciated'};
+}
 function periodMonths(){
   const weeks=new Set();
   DB.sett.forEach(s=>{const w=s.weekEnding||s.date;if(w)weeks.add(w);});
@@ -1674,12 +1707,48 @@ function calcMiles(){
   empty=Math.max(total-loaded,0);
   return {total,loaded,empty,dupWeeks,override:ov>0,deadheadPct:total>0?(empty/total*100):0};
 }
+// Tap Total Deductions to see what's actually in it. A single row that dwarfs
+// the rest is almost always a vehicle purchase or a multi-year contract that
+// belongs in Capital Assets, not in expenses.
+function showExpenseMath(){
+  const cost=calcOperatingCost();
+  const rows=[];
+  DB.ded.forEach(x=>{if(x.taxDeductible!==false&&Number(x.amount||0)>0)rows.push({d:x.desc||x.code||'—',a:Number(x.amount),cat:x.category||'Misc',id:x.id,store:'ded',date:x.date});});
+  DB.fuel.tr.concat(DB.fuel.re).forEach(f=>{const n=Number(f.amount||0)-Number(f.discount||0);if(n>0)rows.push({d:'Fuel — '+(f.location||''),a:n,cat:'Fuel & DEF',date:f.date});});
+  DB.maint.forEach(m=>{const n=Number(m.total||0)-Number(m.covered||0);if(n>0)rows.push({d:m.desc||m.invoice||'Service',a:n,cat:'Maintenance & Repairs',date:m.date});});
+  rows.sort((a,b)=>b.a-a.a);
+  const top=rows.slice(0,12);
+  const big=rows.filter(r=>cost.total>0&&r.a/cost.total>0.15);
+  const html=`<div class="card" style="max-width:620px;margin:0 auto">
+    <div class="ct">🧾 What's inside Total Expenses</div>
+    <div class="g3" style="margin-bottom:10px">
+      <div class="sc"><div class="sl">Total counted</div><div class="sv" style="color:var(--red)">${fmt(cost.total)}</div></div>
+      <div class="sc"><div class="sl">Fixed</div><div class="sv">${fmt(cost.fixed)}</div></div>
+      <div class="sc"><div class="sl">Variable</div><div class="sv">${fmt(cost.variable)}</div></div>
+    </div>
+    ${big.length?`<div style="background:rgba(239,68,68,.1);border:1px solid var(--red);border-radius:6px;padding:8px 11px;margin-bottom:10px;font-size:11.5px">
+      🚩 <b>${big.length} row(s) make up more than 15% of your expenses each.</b> A truck, trailer or multi-year contract does NOT belong in expenses — it's a depreciable asset. Move it with the ✕ button below, then re-add it under Assets → Capital Assets.
+    </div>`:''}
+    <table class="tb"><thead><tr><th>Largest items</th><th>Category</th><th>Amount</th></tr></thead><tbody>
+    ${top.map(r=>`<tr${cost.total>0&&r.a/cost.total>0.15?' style="background:rgba(239,68,68,.08)"':''}><td style="font-size:11px">${fd(r.date)} · ${r.d.slice(0,60)}</td><td class="tm" style="font-size:10px">${r.cat}</td><td class="tm">${fmt(r.a)}${r.id?` <button onclick="acctDelRow('${r.store}','${r.id}');closeExpenseMath();showExpenseMath()" style="background:none;border:1px solid var(--red);color:var(--red);padding:1px 5px;border-radius:4px;font-size:9px;cursor:pointer;margin-left:4px" title="Remove from expenses">✕</button>`:''}</td></tr>`).join('')}
+    </tbody></table>
+    <div style="font-size:10.5px;color:var(--mut);margin-top:8px">Already excluded: ${fmt(cost.excludedTotal)} (vehicle purchases recorded as Capital Assets, advance repayments, escrow deposits, meals covered by per diem).</div>
+    <button class="btn" style="margin-top:12px;width:100%" onclick="closeExpenseMath()">Close</button>
+  </div>`;
+  let o=$('exp-ov');
+  if(!o){o=document.createElement('div');o.id='exp-ov';o.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:9999;overflow:auto;padding:24px 12px';document.body.appendChild(o);}
+  o.innerHTML=html;o.style.display='block';
+}
+function closeExpenseMath(){const o=$('exp-ov');if(o)o.style.display='none';}
 function calcOperatingCost(){
   const buckets={Fuel:0,Maintenance:0,Insurance:0,'Permits/Taxes':0,Tolls:0,Other:0,'Truck payment':0};
   let excludedTotal=0;
   // Multi-year service contracts and major overhauls are capital-ish one-offs:
   // spreading a $7,020 warranty across one month's miles distorts CPM badly.
   const EXCLUDE_CAT=/advance repayment|escrow|meals \(per diem|warranty & service|major repairs/i;
+  // A tractor/trailer purchase is a depreciable asset, never an operating expense
+  // — catch it even when it was imported as a plain deduction row.
+  const VEHICLE_BUY=/\b(tractor|truck|trailer|freightliner|peterbilt|kenworth|volvo|international|mack|western star)\b.*(purchase|buy|bought|sale|title|down ?payment)|purchase.*(tractor|truck|trailer)/i;
   const bucketFor=cat=>{
     if(/fuel/i.test(cat))return'Fuel';
     if(/maintenance|parts|tire|wash|overhaul/i.test(cat))return'Maintenance';
@@ -1691,7 +1760,7 @@ function calcOperatingCost(){
   };
   DB.ded.forEach(x=>{
     const amt=Number(x.amount||0);if(!(amt>0))return;
-    if(x.taxDeductible===false||EXCLUDE_CAT.test(x.category||'')){excludedTotal+=amt;return;}
+    if(x.taxDeductible===false||EXCLUDE_CAT.test(x.category||'')||VEHICLE_BUY.test(x.desc||'')){excludedTotal+=amt;return;}
     buckets[bucketFor(x.category||'')]+=amt;
   });
   DB.fuel.tr.concat(DB.fuel.re).forEach(f=>{buckets.Fuel+=Math.max(0,Number(f.amount||0)-Number(f.discount||0));});
@@ -2553,6 +2622,10 @@ function rAssets(){
       if(_tc.warrantyCost>0)rows.push('Extended warranty: '+fmt(_tc.warrantyCost)+' ÷ '+_tc.warrantyMonths+' mo = '+fmt(_tc.warrantyCost/(_tc.warrantyMonths||1))+'/mo');
       const fixedMo=(_tc.financing==='loan'?_tc.monthlyPayment:(_tc.purchasePrice/(_tc.depreciationMonths||1)))+(_tc.warrantyCost>0?_tc.warrantyCost/(_tc.warrantyMonths||1):0);
       rows.push('<b style="color:var(--acc)">Fixed truck cost: '+fmt(fixedMo)+'/month</b>');
+      const _d=taxDepreciationFor(new Date().getFullYear());
+      if(_d.amount>0)rows.push('<span style="color:var(--grn)">Tax depreciation this year: '+fmt(_d.amount)+'</span> <span style="font-size:10px;color:var(--mut)">'+_d.label+'</span>');
+      else if(_d.label)rows.push('<span style="font-size:10px;color:var(--mut)">'+_d.label+'</span>');
+      else if(_tc.financing!=='lease'&&_tc.purchasePrice>0)rows.push('<span style="color:var(--org);font-size:11px">Depreciation method not set — tap Edit to choose (affects your tax estimate).</span>');
       $('truck-cost-summary').innerHTML=rows.join('<br>');
     }
   }const t=DB.assets.tr;$('a-tr').innerHTML=t?`<table><tbody><tr><td class="tm">Unit #</td><td>${t.unit||'—'}</td></tr><tr><td class="tm">Year/Make/Model</td><td>${t.year||''} ${t.make||''} ${t.model||''}</td></tr><tr><td class="tm">VIN</td><td>${t.vin||'—'}</td></tr><tr><td class="tm">Odometer</td><td>${(t.odometer||0).toLocaleString()} mi</td></tr></tbody></table>`:'<div class="empty">Import PDF</div>';}
@@ -3706,7 +3779,10 @@ function syncTax(){
     }
   }
 }
-function calcTax(){const rev=+($('ti-rev').value||0),exp=+($('ti-exp').value||0),spouse=+($('ti-spouse')?$('ti-spouse').value||0:0),sep=+($('ti-sep').value||0),hlt=+($('ti-hlt').value||0),sta=$('ti-sta').value;const np=Math.max(0,rev-exp),seb=np*.9235,set=seb*.153,sed=set*.5;const agi=Math.max(0,np+spouse-sed-sep-hlt);const std=sta==='mfj'?30000:sta==='hoh'?22500:15000;const tax=Math.max(0,agi-std);const brk=sta==='mfj'?[[0,23850,.10],[23850,96950,.12],[96950,206700,.22],[206700,394600,.24],[394600,501050,.32],[501050,751600,.35],[751600,1/0,.37]]:[[0,11925,.10],[11925,48475,.12],[48475,103350,.22],[103350,197300,.24],[197300,250525,.32],[250525,626350,.35],[626350,1/0,.37]];let fed=0,det='';for(const[lo,hi,r]of brk){if(tax<=lo)break;const ch=Math.min(tax,hi)-lo;fed+=ch*r;det+=`<div class="osr"><span>${(r*100).toFixed(0)}% on ${fmt(ch)}</span><span class="tr">${fmt(ch*r)}</span></div>`;}const tot=set+fed,qtr=tot/4;$('tx-np').textContent=fmt(np);$('tx-se').textContent=fmt(set);$('tx-sed').textContent='-'+fmt(sed);$('tx-agi').textContent=fmt(agi);$('tx-std').textContent='-'+fmt(std);$('tx-tax').textContent=fmt(tax);$('tx-brk').innerHTML=det;$('tx-fed').textContent=fmt(fed);$('tx-all').textContent=fmt(tot);$('tx-net').textContent=fmt(np);$('tx-tot').textContent=fmt(tot);$('tx-qtr').textContent=fmt(qtr);['tq1','tq2','tq3','tq4'].forEach(id=>$(id).textContent=fmt(qtr));$('tx-res').style.display='block';}
+function calcTax(){const _dep=taxDepreciationFor(new Date().getFullYear());const rev=+($('ti-rev').value||0),exp=+($('ti-exp').value||0)+(_dep.amount||0),spouse=+($('ti-spouse')?$('ti-spouse').value||0:0),sep=+($('ti-sep').value||0),hlt=+($('ti-hlt').value||0),sta=$('ti-sta').value;const np=Math.max(0,rev-exp),seb=np*.9235,set=seb*.153,sed=set*.5;const agi=Math.max(0,np+spouse-sed-sep-hlt);const std=sta==='mfj'?30000:sta==='hoh'?22500:15000;const tax=Math.max(0,agi-std);const brk=sta==='mfj'?[[0,23850,.10],[23850,96950,.12],[96950,206700,.22],[206700,394600,.24],[394600,501050,.32],[501050,751600,.35],[751600,1/0,.37]]:[[0,11925,.10],[11925,48475,.12],[48475,103350,.22],[103350,197300,.24],[197300,250525,.32],[250525,626350,.35],[626350,1/0,.37]];let fed=0,det='';for(const[lo,hi,r]of brk){if(tax<=lo)break;const ch=Math.min(tax,hi)-lo;fed+=ch*r;det+=`<div class="osr"><span>${(r*100).toFixed(0)}% on ${fmt(ch)}</span><span class="tr">${fmt(ch*r)}</span></div>`;}const tot=set+fed,qtr=tot/4;$('tx-np').textContent=fmt(np);
+  if($('tx-dep')){
+    $('tx-dep').innerHTML=_dep.amount>0?`<div class="osr"><span>Truck depreciation (${_dep.label})</span><span class="tr">-${fmt(_dep.amount)}</span></div><div style="font-size:10px;color:var(--mut);margin:-2px 0 6px">Included in expenses above. Depreciation elections are a CPA decision — Section 179 and bonus rules change yearly and have limits.</div>`:(_dep.label?`<div style="font-size:10px;color:var(--mut);margin-bottom:6px">${_dep.label}</div>`:'');
+  }$('tx-se').textContent=fmt(set);$('tx-sed').textContent='-'+fmt(sed);$('tx-agi').textContent=fmt(agi);$('tx-std').textContent='-'+fmt(std);$('tx-tax').textContent=fmt(tax);$('tx-brk').innerHTML=det;$('tx-fed').textContent=fmt(fed);$('tx-all').textContent=fmt(tot);$('tx-net').textContent=fmt(np);$('tx-tot').textContent=fmt(tot);$('tx-qtr').textContent=fmt(qtr);['tq1','tq2','tq3','tq4'].forEach(id=>$(id).textContent=fmt(qtr));$('tx-res').style.display='block';}
 
 // ═══ PDF IMPORT ═══
 const STEPS=['Reading document...','Identifying type...','Extracting data...','Routing to modules...','AI processing...'];
