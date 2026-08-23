@@ -144,7 +144,7 @@ canvas{max-height:160px;}
     <div class="ni" onclick="go('settings',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M5.64 5.64a10 10 0 0 1 0 13.13"/></svg>Settings</div>
   </div>
   <div class="suser"><div class="sav">AB</div><div class="sui">Ali Bozkurt<small>Graywolf Logistics</small></div></div>
-  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.08.04-Q</div>
+  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.08.04-T</div>
 </div>
 <div id="main">
   <div id="readonly-banner" style="display:none;background:var(--org);color:#000;padding:6px 18px;align-items:center;gap:8px;font-size:12px;font-weight:600">👀 View-Only Mode — you're looking, not editing. Ask the owner for changes.</div>
@@ -372,7 +372,7 @@ canvas{max-height:160px;}
       <div class="g3">
         <div class="sc"><div class="sl">Total Contribution Base</div><div class="sv tg" id="cap-total">$60,000.00</div><div class="sch">initial + additional</div></div>
         <div class="sc"><div class="sl">YTD Draws</div><div class="sv tr" id="cap-draws-stat">$0.00</div></div>
-        <div class="sc"><div class="sl">Tax-Free Remaining</div><div class="sv" id="cap-remain-stat" style="color:var(--grn)">$60,000.00</div></div>
+        <div class="sc"><div class="sl">Tax-Free Remaining</div><div class="sv" id="cap-remain-stat" style="color:var(--grn)">$0.00</div></div>
       </div>
       <div class="g2">
         <div class="card">
@@ -381,10 +381,12 @@ canvas{max-height:160px;}
           <div class="osr"><span>+ Additional Contributions</span><span class="tg" id="cap-contrib-list">$0.00</span></div>
           <div id="cap-contrib-hint" style="font-size:10px;color:var(--mut);margin:-4px 0 4px 0"></div>
           <div class="osr"><span>YTD Draws</span><span class="tr" id="cap-draws-list">$0.00</span></div>
-          <div class="osr tot"><span>Tax-Free Remaining</span><span id="cap-remain" style="color:var(--grn)">$60,000.00</span></div>
+          <div class="osr tot"><span>Tax-Free Remaining</span><span id="cap-remain" style="color:var(--grn)">$0.00</span></div>
+          <div style="font-size:10px;color:var(--mut);margin-top:2px">Contributions (cash in + expenses you paid personally) minus draws. Below zero means you've drawn past your capital — further draws come out of profit.</div>
           <button class="btn" onclick="addContribution()" style="margin-top:10px;width:100%;background:var(--grn);border-color:var(--grn)">💵 Record Money In (Contribution)</button>
           <button class="btn" onclick="addOwnerDraw()" style="margin-top:6px;width:100%">💸 Record Owner's Draw (money out)</button>
           <button onclick="updateBizBalance()" style="margin-top:6px;width:100%;background:var(--card2);border:1px solid var(--bor);color:var(--txt);padding:7px;border-radius:7px;font-size:12px;cursor:pointer">🏦 Update Business Balance</button>
+          <button onclick="dedupeEquity()" style="margin-top:6px;width:100%;background:var(--card2);border:1px solid var(--bor);color:var(--mut);padding:7px;border-radius:7px;font-size:11px;cursor:pointer">🧹 Remove Duplicate Entries</button>
           <button onclick="cleanupOrphanedContributions(false)" style="margin-top:6px;width:100%;background:var(--card2);border:1px solid var(--bor);color:var(--mut);padding:7px;border-radius:7px;font-size:11px;cursor:pointer">🧹 Clean Up Orphaned Contributions</button>
           <button onclick="cleanupStaleDocs(false)" style="margin-top:6px;width:100%;background:var(--card2);border:1px solid var(--bor);color:var(--mut);padding:7px;border-radius:7px;font-size:11px;cursor:pointer">🧹 Clean Up False "Duplicate" Warnings</button>
         </div>
@@ -1021,7 +1023,8 @@ const CAPITAL={contribution:0,draws:JSON.parse(localStorage.getItem('gw_draws')|
   let changed=false;
   SEEDS.forEach(s=>{
     const list=s.kind==='draw'?CAPITAL.draws:CAPITAL.extraContributions;
-    if(!list.some(x=>x.id===s.id)){
+    const exists=list.some(x=>x.id===s.id)||list.some(x=>x.date===s.date&&Number(x.amount)===s.amount);
+    if(!exists){
       list.push({id:s.id,date:s.date,amount:s.amount,desc:s.desc,note:s.desc,_balApplied:s._balApplied});changed=true;
     }
   });
@@ -1113,6 +1116,30 @@ function adjustBizBalance(delta,why){
   localStorage.setItem('gw_bizbal',next.toString());
   console.log('Balance '+(delta>=0?'+':'')+delta.toFixed(2)+' ('+(why||'')+') → '+next.toFixed(2));
   return next;
+}
+// Removes accidental duplicate equity rows (same date + same amount), keeping
+// the first of each pair and reversing the extras out of the balance.
+function dedupeEquity(){
+  if(guardReadOnly())return;
+  let removed=0,balBack=0;
+  [['contribution',CAPITAL.extraContributions],['draw',CAPITAL.draws]].forEach(([type,list])=>{
+    const seen=new Set(),keep=[];
+    list.forEach(x=>{
+      if(x.sourceDeductionId){keep.push(x);return;} // linked rows are never duplicates
+      const key=type+'|'+(x.date||'')+'|'+Number(x.amount||0).toFixed(2);
+      if(seen.has(key)){
+        removed++;
+        if(x._balApplied!==undefined){const d=type==='draw'?x._balApplied:-x._balApplied;balBack+=d;}
+      }else{seen.add(key);keep.push(x);}
+    });
+    list.length=0;list.push(...keep);
+  });
+  if(removed){
+    if(balBack)adjustBizBalance(balBack,'dedupe equity');
+    _eqSave('contribution');_eqSave('draw');
+    rCapital();rDash&&rDash();try{rAcctMonth();}catch(e){}
+    alert('🧹 Removed '+removed+' duplicate entr'+(removed>1?'ies':'y')+'.'+(balBack?'\nBalance corrected by '+fmt(balBack)+'.':''));
+  }else alert('No duplicates found — every entry has a unique date and amount.');
 }
 function addOwnerDraw(){
   if(guardReadOnly())return;
@@ -1584,7 +1611,7 @@ function addContribution(){
 function rCapital(){
   const totalDraws=getTotalDraws();
   const totalContrib=getTotalContributions();
-  const effectiveContribution=CAPITAL.contribution+totalContrib;
+  const effectiveContribution=totalContrib; // every contribution is an explicit row now — no hidden base amount
   const capRemain=effectiveContribution-totalDraws;
   const bizBal=parseFloat(localStorage.getItem('gw_bizbal')||'60000');
   if($('d-bizbal')){
@@ -1594,7 +1621,7 @@ function rCapital(){
   // Dashboard compact strip
   if($('d-cap-total'))$('d-cap-total').textContent=fmt(effectiveContribution);
   if($('d-cap-draws'))$('d-cap-draws').textContent=fmt(totalDraws);
-  if($('d-cap-left')){$('d-cap-left').textContent=fmt(Math.max(0,capRemain));$('d-cap-left').style.color=capRemain>0?'var(--grn)':'var(--red)';}
+  if($('d-cap-left')){$('d-cap-left').textContent=fmt(capRemain);$('d-cap-left').style.color=capRemain>0?'var(--grn)':'var(--red)';}
   if($('d-cap-latest')){
     const n=CAPITAL.extraContributions.length;
     if(n>0){
@@ -1607,7 +1634,7 @@ function rCapital(){
   // Dedicated Capital Account page stats
   if($('cap-total'))$('cap-total').textContent=fmt(effectiveContribution);
   if($('cap-draws-stat'))$('cap-draws-stat').textContent=fmt(totalDraws);
-  if($('cap-remain-stat')){$('cap-remain-stat').textContent=fmt(Math.max(0,capRemain));$('cap-remain-stat').style.color=capRemain>0?'var(--grn)':'var(--red)';}
+  if($('cap-remain-stat')){$('cap-remain-stat').textContent=fmt(capRemain);$('cap-remain-stat').style.color=capRemain>0?'var(--grn)':'var(--red)';$('cap-remain-stat').title=capRemain<0?'You have drawn more than you contributed — further draws come out of profits':'Contributions minus draws';}
 
   // Update capital card
   if($('cap-draws-list'))$('cap-draws-list').textContent=fmt(totalDraws);
@@ -1621,14 +1648,18 @@ function rCapital(){
       $('cap-contrib-hint').textContent='';
     }
   }
-  if($('cap-remain')){$('cap-remain').textContent=fmt(Math.max(0,capRemain));$('cap-remain').style.color=capRemain>0?'var(--grn)':'var(--red)';}
+  if($('cap-remain')){$('cap-remain').textContent=fmt(capRemain);$('cap-remain').style.color=capRemain>0?'var(--grn)':'var(--red)';}
   if($('cap-draw-history')){
     if(!CAPITAL.draws.length&&!CAPITAL.extraContributions.length){
       $('cap-draw-history').innerHTML='<div class="empty">No draws or contributions yet</div>';
     }else{
       const drawRows=CAPITAL.draws.map(d=>({...d,_type:'draw'}));
-      const contribRows=CAPITAL.extraContributions.map(d=>({...d,_type:'contrib'}));
-      const allRows=[...drawRows,...contribRows].sort((a,b)=>new Date(b.date)-new Date(a.date));
+      const contribRows=CAPITAL.extraContributions.map(d=>({...d,_type:'contribution'}));
+      const allRows=[...drawRows,...contribRows].sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')));
+      // Repair any legacy row missing an id so its controls work.
+      let idFixed=false;
+      [CAPITAL.draws,CAPITAL.extraContributions].forEach(list=>list.forEach(x=>{if(!x.id){x.id=uid();idFixed=true;}}));
+      if(idFixed){localStorage.setItem('gw_draws',JSON.stringify(CAPITAL.draws));localStorage.setItem('gw_contributions',JSON.stringify(CAPITAL.extraContributions));}
       $('cap-draw-history').innerHTML=allRows.map(d=>{
         const linked=d._type!=='draw'&&d.sourceDeductionId;
         return `<div class="osr" style="font-size:11px;align-items:center;gap:6px">
@@ -3866,6 +3897,12 @@ window.addEventListener('load',()=>{
       }
     });
     if(lodgeFix>0){saveDB();console.log('Re-filed',lodgeFix,'lodging lines');}
+    // Pass 14 (2026-08-04): the old hard-coded $60,000 base was being ADDED to the
+    // explicit contribution rows, inflating the total. Contributions now come from
+    // rows only; warn if the seeded row is missing so nothing silently vanishes.
+    if(!CAPITAL.extraContributions.some(x=>x.id==='seed-cap-2026-05-07')){
+      console.warn('Seeded $60,000 contribution not present — add it from Capital Account if it should be there.');
+    }
   }catch(e){console.error('tax-merge:',e);}
   // One-time migration: older imports didn't tag settlement-withheld deductions. Any deduction
   // whose date matches a settlement AND has no payment/source info is treated as withheld.
