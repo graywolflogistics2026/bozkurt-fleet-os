@@ -144,7 +144,7 @@ canvas{max-height:160px;}
     <div class="ni" onclick="go('settings',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M5.64 5.64a10 10 0 0 1 0 13.13"/></svg>Settings</div>
   </div>
   <div class="suser"><div class="sav">AB</div><div class="sui">Ali Bozkurt<small>Graywolf Logistics</small></div></div>
-  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.08.05-O</div>
+  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.08.05-Q</div>
 </div>
 <div id="main">
   <div id="readonly-banner" style="display:none;background:var(--org);color:#000;padding:6px 18px;align-items:center;gap:8px;font-size:12px;font-weight:600">👀 View-Only Mode — you're looking, not editing. Ask the owner for changes.</div>
@@ -1558,7 +1558,7 @@ function periodMonths(){
 // Full CPM arithmetic on demand — no more guessing why the number looks wrong.
 function showCpmMath(){
   const cost=calcOperatingCost();
-  const totalMiles=DB.sett.reduce((a,x)=>a+(Number(x.miles)||0),0);
+  const _m=calcMiles();const totalMiles=_m.total;
   const gross=DB.sett.reduce((a,x)=>a+(Number(x.gross)||0),0);
   const tc=getTruckCost(),months=periodMonths();
   const parts=Object.entries(cost.buckets).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]);
@@ -1578,9 +1578,10 @@ function showCpmMath(){
     </div>
     <table class="tb"><thead><tr><th>Bucket</th><th>Total</th><th>Per mile</th></tr></thead><tbody>${rows||'<tr><td colspan="3" class="empty">No costs recorded</td></tr>'}</tbody></table>
     <div style="font-size:11px;color:var(--mut);margin-top:8px">
+      Miles: <b>${_m.loaded.toLocaleString()}</b> loaded + <b>${_m.empty.toLocaleString()}</b> empty (deadhead ${_m.deadheadPct.toFixed(0)}%) = ${totalMiles.toLocaleString()} total.${_m.dupWeeks?` <span style="color:var(--org)">⚠️ ${_m.dupWeeks} duplicate settlement week(s) were ignored — delete them on the Settlements page.</span>`:''}<br>
       Fixed truck cost included: ${tc.financing==='loan'?fmt(tc.monthlyPayment)+'/mo loan payment':fmt(tc.purchasePrice/(tc.depreciationMonths||1))+'/mo (truck '+fmt(tc.purchasePrice)+' ÷ '+tc.depreciationMonths+' mo)'}${tc.warrantyCost>0?' + '+fmt(tc.warrantyCost/(tc.warrantyMonths||1))+'/mo warranty':''} × ${months.toFixed(1)} months of data.<br>
       Excluded one-off costs: ${fmt(cost.excludedTotal)} (vehicle purchases, advance repayments, escrow, meals).<br>
-      Revenue per mile: ${totalMiles>0?'$'+(gross/totalMiles).toFixed(2):'—'} · Profit per mile: ${totalMiles>0?'$'+((gross-cost.total)/totalMiles).toFixed(2):'—'}
+      Revenue per TOTAL mile: ${totalMiles>0?'$'+(gross/totalMiles).toFixed(2):'—'} · per LOADED mile: ${_m.loaded>0?'$'+(gross/_m.loaded).toFixed(2):'—'} · Profit per mile: ${totalMiles>0?'$'+((gross-cost.total)/totalMiles).toFixed(2):'—'}
     </div>
     ${missRows}
     <button class="btn" style="margin-top:12px;width:100%" onclick="closeCpmMath()">Close</button>
@@ -1590,12 +1591,46 @@ function showCpmMath(){
   ov.innerHTML=html;ov.style.display='block';
 }
 function closeCpmMath(){const ov=$('cpm-math-ov');if(ov)ov.style.display='none';}
+// Manual miles entry from the Settlements table — the statement's own total,
+// loaded + empty. Recomputes CPM, RPM, per-diem context and the reports.
+function setSettMilesById(id,v){
+  if(guardReadOnly())return;
+  const s=DB.sett.find(x=>x.id===id);if(!s)return;
+  const n=parseInt(String(v).replace(/[^0-9]/g,''));
+  s.miles=isFinite(n)&&n>0?n:0;
+  saveDB();rAll();
+}
 function setSettMiles(id,v){
   if(guardReadOnly())return;
   const s=DB.sett.find(x=>x.id===id);if(!s)return;
   const n=parseInt(String(v).replace(/[^0-9]/g,''))||0;
   if(n<=0)return;
   s.miles=n;saveDB();rAll();showCpmMath();
+}
+// ═══ MILES — loaded + empty (deadhead), counted once ═══
+// Deadhead is real cost: you burn fuel and wear the truck running empty, so CPM
+// must divide by TOTAL miles. Loaded miles are tracked separately because rate
+// per LOADED mile is how brokers quote and how drivers judge a load.
+function calcMiles(){
+  const seen=new Set();let total=0,loaded=0,empty=0,dupWeeks=0;
+  DB.sett.forEach(s=>{
+    const wk=s.weekEnding||s.date||s.id;
+    if(seen.has(wk)){dupWeeks++;return;}   // duplicate settlement week — count once
+    seen.add(wk);
+    const kids=DB.loads.filter(l=>l._batch&&s._batch&&l._batch===s._batch);
+    const kidLoaded=kids.reduce((a,l)=>a+Number(l.loadedMiles||0),0);
+    const kidEmpty=kids.reduce((a,l)=>a+Number(l.emptyMiles||0),0);
+    const stated=Number(s.miles||0);
+    // Prefer the statement's own total when it's at least the sum of its loads;
+    // otherwise trust the loads (a statement can print only loaded miles).
+    const kidTotal=kidLoaded+kidEmpty;
+    const t=Math.max(stated,kidTotal);
+    total+=t;loaded+=kidLoaded;empty+=Math.max(kidEmpty,t-kidLoaded-kidEmpty>0?0:0);
+    empty+=0;
+  });
+  loaded=Math.min(loaded,total);
+  empty=Math.max(total-loaded,0);
+  return {total,loaded,empty,dupWeeks,deadheadPct:total>0?(empty/total*100):0};
 }
 function calcOperatingCost(){
   const buckets={Fuel:0,Maintenance:0,Insurance:0,'Permits/Taxes':0,Tolls:0,Other:0,'Truck payment':0};
@@ -1702,12 +1737,11 @@ function rDash(){
   const ded=calcOperatingCost().total;
   const carrierNet=DB.sett.reduce((a,x)=>a+(x.net||0),0);
   const net=rev-ded; // TRUE profit — the carrier's net pay ignores what you paid yourself
-  const mi=DB.sett.reduce((a,x)=>a+(x.miles||0),0);
+  const mi=calcMiles().total;
   $('d-rev').textContent=fmt(rev);$('d-ded').textContent=fmt(ded);
   $('d-net').textContent=fmt(net);$('d-net').style.color=net>=0?'var(--grn)':'var(--red)';
   $('d-net').title='Gross revenue '+fmt(rev)+' − all deductible expenses '+fmt(ded)+'\nCarrier net pay (what hit your account): '+fmt(carrierNet);
   if($('d-ded'))$('d-ded').title='Withheld + out-of-pocket, including fuel, maintenance and tolls. Excludes meals (per diem), advance repayments and escrow.';
-  $('d-miles').textContent=mi.toLocaleString();
   const last=DB.sett[DB.sett.length-1];
   if(last)$('d-lastsett').innerHTML=`<div class="cf"><span style="color:var(--mut)">Gross</span><span class="tg">${fmt(last.gross)}</span></div><div class="cf"><span style="color:var(--mut)">Reimb</span><span class="tg">+${fmt(last.reimb||0)}</span></div><div class="cf"><span style="color:var(--mut)">Deductions</span><span class="tr">-${fmt(last.ded||0)}</span></div><div class="cf" style="border-top:1px solid var(--bor);margin-top:4px"><b>Net</b><span style="color:var(--acc);font-size:15px;font-weight:700">${fmt(last.net)}</span></div>`;
   if(DB.loads.length)$('d-loads').innerHTML='<table><thead><tr><th>Order</th><th>Route</th><th>Revenue</th></tr></thead><tbody>'+[...DB.loads].reverse().slice(0,4).map(x=>`<tr><td class="ta">${x.order||'—'}</td><td class="tm">${x.from||'—'} → ${x.to||'—'}</td><td class="tg">${fmt(x.revenue)}</td></tr>`).join('')+'</tbody></table>';
@@ -1759,7 +1793,12 @@ function rDash(){
   }
   // Cost-per-mile: THE owner-operator metric. Total cost = everything withheld from
   // settlements + everything paid out-of-pocket. Revenue = gross. Miles = settlement miles.
-  const totalMiles=DB.sett.reduce((a,x)=>a+(x.miles||0),0);
+  const _mi=calcMiles();
+  const totalMiles=_mi.total;
+  if($('d-miles')){
+    $('d-miles').textContent=totalMiles.toLocaleString();
+    $('d-miles').title=_mi.loaded.toLocaleString()+' loaded + '+_mi.empty.toLocaleString()+' empty (deadhead '+_mi.deadheadPct.toFixed(0)+'%)'+(_mi.dupWeeks?'\n⚠️ '+_mi.dupWeeks+' duplicate settlement week(s) ignored':'');
+  }
   if(totalMiles>0){
     const grossRev=DB.sett.reduce((a,x)=>a+(x.gross||0),0);
     const cost=calcOperatingCost();
@@ -2028,7 +2067,7 @@ function deleteLoad(i){
   DB.loads.splice(i,1);
   saveDB();rLoads();rDash();
 }
-function rSett(){const g=DB.sett.reduce((a,x)=>a+(x.gross||0),0),r=DB.sett.reduce((a,x)=>a+(x.reimb||0),0),d=DB.sett.reduce((a,x)=>a+(x.ded||0),0),n=DB.sett.reduce((a,x)=>a+(x.net||0),0);$('s-gross').textContent=fmt(g);$('s-reimb').textContent=fmt(r);$('s-ded').textContent=fmt(d);$('s-net').textContent=fmt(n);if(!DB.sett.length){$('s-tbl').innerHTML='<div class="empty">Import PDF</div>';return;}$('s-tbl').innerHTML='<table><thead><tr><th>Date</th><th>Week</th><th>Gross</th><th>Reimb</th><th>Ded</th><th>Net</th><th>Miles</th><th>Days☀</th><th></th></tr></thead><tbody>'+DB.sett.map((x,i)=>`<tr><td>${fd(x.date)}</td><td class="tm">${x.weekEnding||'—'}</td><td class="tg">${fmt(x.gross)}</td><td class="tg">+${fmt(x.reimb||0)}</td><td class="tr">-${fmt(x.ded||0)}</td><td style="color:var(--acc);font-weight:700">${fmt(x.net)}</td><td class="tm">${x.miles?x.miles.toLocaleString():'—'}</td><td><input type="number" min="0" max="7" value="${(x.perDiemDays===0||x.perDiemDays)?x.perDiemDays:7}" onchange="setSettDays(${i},this.value)" title="Per diem days on road this week (0-7)" style="width:44px;background:var(--c2);border:1px solid var(--bd);color:var(--tx);border-radius:4px;padding:2px 4px;font-size:11px"></td><td><button onclick="deleteSett(${i})" style="background:none;border:1px solid var(--red);color:var(--red);padding:2px 7px;border-radius:4px;font-size:10px;cursor:pointer">✕</button></td></tr>`).join('')+'</tbody></table>';}
+function rSett(){const g=DB.sett.reduce((a,x)=>a+(x.gross||0),0),r=DB.sett.reduce((a,x)=>a+(x.reimb||0),0),d=DB.sett.reduce((a,x)=>a+(x.ded||0),0),n=DB.sett.reduce((a,x)=>a+(x.net||0),0);$('s-gross').textContent=fmt(g);$('s-reimb').textContent=fmt(r);$('s-ded').textContent=fmt(d);$('s-net').textContent=fmt(n);if(!DB.sett.length){$('s-tbl').innerHTML='<div class="empty">Import PDF</div>';return;}$('s-tbl').innerHTML='<table><thead><tr><th>Date</th><th>Week</th><th>Gross</th><th>Reimb</th><th>Ded</th><th>Net</th><th>Miles ✏️</th><th>Days☀</th><th></th></tr></thead><tbody>'+DB.sett.map((x,i)=>`<tr><td>${fd(x.date)}</td><td class="tm">${x.weekEnding||'—'}</td><td class="tg">${fmt(x.gross)}</td><td class="tg">+${fmt(x.reimb||0)}</td><td class="tr">-${fmt(x.ded||0)}</td><td style="color:var(--acc);font-weight:700">${fmt(x.net)}</td><td class="tm"><input type="number" min="0" value="${x.miles||''}" placeholder="—" onchange="setSettMilesById('${x.id}',this.value)" title="Total miles for this week (loaded + empty). Edit if the statement was mis-read." style="width:74px;background:var(--c2);border:1px solid ${x.miles?'var(--bd)':'var(--org)'};color:var(--tx);border-radius:4px;padding:2px 4px;font-size:11px;text-align:right"></td><td><input type="number" min="0" max="7" value="${(x.perDiemDays===0||x.perDiemDays)?x.perDiemDays:7}" onchange="setSettDays(${i},this.value)" title="Per diem days on road this week (0-7)" style="width:44px;background:var(--c2);border:1px solid var(--bd);color:var(--tx);border-radius:4px;padding:2px 4px;font-size:11px"></td><td><button onclick="deleteSett(${i})" style="background:none;border:1px solid var(--red);color:var(--red);padding:2px 7px;border-radius:4px;font-size:10px;cursor:pointer">✕</button></td></tr>`).join('')+'</tbody></table>';}
 function rReimb(){const t=DB.reimb.reduce((a,x)=>a+(x.amount||0),0);$('r-tot').textContent=fmt(t);$('r-war').textContent=fmt(DB.reimb.filter(x=>/warranty/i.test(x.desc||'')).reduce((a,x)=>a+(x.amount||0),0));$('r-fuel').textContent=fmt(DB.reimb.filter(x=>/fuel/i.test(x.desc||'')).reduce((a,x)=>a+(x.amount||0),0));if(!DB.reimb.length){$('r-tbl').innerHTML='<div class="empty">Import PDF</div>';return;}$('r-tbl').innerHTML='<table><thead><tr><th>Date</th><th>Description</th><th>Ref</th><th>Amount</th></tr></thead><tbody>'+DB.reimb.map(x=>`<tr><td>${fd(x.date)}</td><td>${x.desc||'—'}</td><td class="tm">${x.ref||'—'}</td><td class="tg">${fmt(x.amount)}</td></tr>`).join('')+'</tbody></table>';}
 function rFuel(){const tG=DB.fuel.tr.reduce((a,x)=>a+(x.amount||0),0),tD=DB.fuel.tr.reduce((a,x)=>a+(x.discount||0),0),rG=DB.fuel.re.reduce((a,x)=>a+(x.amount||0),0),rD=DB.fuel.re.reduce((a,x)=>a+(x.discount||0),0);$('f-tr').textContent=fmt(tG);$('f-re').textContent=fmt(rG);$('f-dis').textContent=fmt(tD+rD);$('f-net').textContent=fmt(tG+rG-tD-rD);const ft=(arr,id,type)=>{if(!arr.length){$(id).innerHTML='<div class="empty">Import PDF</div>';return;}$(id).innerHTML='<table><thead><tr><th>Date</th><th>Location</th><th>Gallons</th><th>Amount</th><th>Discount</th><th></th></tr></thead><tbody>'+arr.map((x,i)=>`<tr><td>${fd(x.date)}</td><td class="tm">${x.location||'—'}</td><td>${(x.gallons||0).toFixed(1)}</td><td class="tr">${fmt(x.amount)}</td><td class="tg">${x.discount?'-'+fmt(x.discount):'—'}</td><td><button onclick="deleteFuel('${type}',${i})" style="background:none;border:1px solid var(--red);color:var(--red);padding:2px 7px;border-radius:4px;font-size:10px;cursor:pointer">✕</button></td></tr>`).join('')+'</tbody></table>';};ft(DB.fuel.tr,'f-trtbl','tr');ft(DB.fuel.re,'f-retbl','re');}
 
