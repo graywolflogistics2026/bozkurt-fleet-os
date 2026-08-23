@@ -144,7 +144,7 @@ canvas{max-height:160px;}
     <div class="ni" onclick="go('settings',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M5.64 5.64a10 10 0 0 1 0 13.13"/></svg>Settings</div>
   </div>
   <div class="suser"><div class="sav">AB</div><div class="sui">Ali Bozkurt<small>Graywolf Logistics</small></div></div>
-  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.08.02-B</div>
+  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.08.04-B</div>
 </div>
 <div id="main">
   <div id="readonly-banner" style="display:none;background:var(--org);color:#000;padding:6px 18px;align-items:center;gap:8px;font-size:12px;font-weight:600">👀 View-Only Mode — you're looking, not editing. Ask the owner for changes.</div>
@@ -770,9 +770,17 @@ canvas{max-height:160px;}
         <div class="ct">🔧 Expense Breakdown by Category</div>
         <div id="ap-cats"><div class="empty">Import PDF settlements</div></div>
       </div>
-      <div class="card" style="text-align:center">
-        <p style="color:var(--mut);font-size:12px;margin-bottom:12px">Generates a complete JSON file with all 2026 financial data organized for your accountant (Schedule C, , loans, assets)</p>
-        <button class="btn" onclick="genPkg()">📦 Generate Accountant Package</button>
+      <div class="card">
+        <div class="ct">📅 Monthly Expense Report — for your accountant</div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+          <select class="fi" id="ap-month" onchange="rAcctMonth()" style="max-width:220px"></select>
+          <button class="btn" onclick="exportAcctExcel()">📊 Excel (month)</button>
+          <button class="btn" onclick="exportAcctExcel(true)">📊 Excel (year)</button>
+          <button class="btn" onclick="exportAcctPDF()">📄 PDF (month)</button>
+          <button class="btn" onclick="exportAcctPDF(true)">📄 PDF (year)</button>
+          <button class="btn" onclick="genPkg()">📦 JSON backup</button>
+        </div>
+        <div id="ap-monthly"><div class="empty">Import settlements and receipts to build the report</div></div>
       </div>
     </div>
 
@@ -2316,6 +2324,7 @@ function saveEquipEdit(i,btn){
   rAreg();rDash();
 }
 function rAcct(){
+  try{rAcctMonth();}catch(e){console.error('Monthly report failed:',e);}
   const rev=DB.sett.reduce((a,x)=>a+(x.gross||0),0),ded=dedTotal();
   $('ap-rev').textContent=fmt(rev);$('ap-ded').textContent=fmt(ded);$('ap-net').textContent=fmt(rev-ded);
   $('ap-net').style.color=(rev-ded)>=0?'var(--grn)':'var(--red)';$('ap-cnt').textContent=DB.sett.length;
@@ -2352,6 +2361,185 @@ function rAcct(){
   $('ap-cats').innerHTML=Object.keys(ec).length?
     Object.entries(ec).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<div class="osr"><span>${k}</span><span class="${k.includes('Per Diem')?'tg':'tr'}">${fmt(v)}</span></div>`).join('')+`<div class="osr tot"><span>Total Deductions + Per Diem</span><span class="tr">${fmt(ded+pdAmt)}</span></div>`
     :'<div class="empty">Import PDF settlements</div>';
+}
+// ═══ ACCOUNTANT: monthly expense report ═══
+// Groups every deductible expense by month + Schedule C category, lists the
+// lumper fees the accountant asked for separately, and totals everything.
+function acctMonths(){
+  const set=new Set();
+  DB.ded.forEach(x=>{if(x.date)set.add(x.date.slice(0,7));});
+  DB.fuel.tr.concat(DB.fuel.re).forEach(x=>{if(x.date)set.add(x.date.slice(0,7));});
+  DB.maint.forEach(x=>{if(x.date)set.add(x.date.slice(0,7));});
+  (DB.tolls.ez||[]).concat(DB.tolls.dw||[]).forEach(x=>{if(x.date)set.add(x.date.slice(0,7));});
+  return [...set].sort().reverse();
+}
+const MONTH_LABEL=m=>{const[y,mo]=m.split('-');return new Date(+y,+mo-1,1).toLocaleDateString('en-US',{month:'long',year:'numeric'});};
+function acctMonthData(mo){
+  const inMo=d=>d&&d.slice(0,7)===mo;
+  const cats={};
+  const add=(cat,amt,desc,date,src)=>{
+    if(!cats[cat])cats[cat]={total:0,items:[]};
+    cats[cat].total+=amt;cats[cat].items.push({desc,amount:amt,date,src});
+  };
+  // Deductions (skip non-deductible: meals/per-diem, advance repayments, escrow)
+  DB.ded.forEach(x=>{
+    if(!inMo(x.date)||x.taxDeductible===false)return;
+    add(x.category||'Misc',x.amount||0,x.desc||x.code||'—',x.date,x.source==='settlement'?'Settlement':'Out-of-pocket');
+  });
+  // Fuel
+  DB.fuel.tr.forEach(f=>{if(inMo(f.date))add('Fuel & DEF',(f.amount||0)-(f.discount||0),'Tractor fuel — '+(f.location||''),f.date,'Fuel');});
+  DB.fuel.re.forEach(f=>{if(inMo(f.date))add('Fuel & DEF',(f.amount||0)-(f.discount||0),'Reefer fuel — '+(f.location||''),f.date,'Fuel');});
+  // Maintenance (net of warranty credit)
+  DB.maint.forEach(m=>{if(inMo(m.date))add('Maintenance & Repairs',(m.total||0)-(m.covered||0),m.desc||m.invoice||'Service',m.date,'Maintenance');});
+  // Tolls
+  (DB.tolls.ez||[]).forEach(t=>{if(inMo(t.date))add('Tolls & Scales',t.amount||0,'EZ-Pass — '+(t.location||''),t.date,'Toll');});
+  (DB.tolls.dw||[]).forEach(t=>{if(inMo(t.date))add('Tolls & Scales',t.amount||0,'Drivewyze — '+(t.location||''),t.date,'Toll');});
+  // Lumper fees — accountant wants these called out separately (they appear as
+  // reimbursements/income AND as the advance that paid them)
+  const lumperRe=/lumper/i;
+  const lumpers=[];
+  DB.reimb.forEach(r=>{if(inMo(r.date)&&lumperRe.test(r.desc||''))lumpers.push({desc:r.desc,amount:r.amount||0,date:r.date,kind:'Reimbursed to you'});});
+  DB.ded.forEach(x=>{if(inMo(x.date)&&lumperRe.test(x.desc||''))lumpers.push({desc:x.desc,amount:x.amount||0,date:x.date,kind:'Paid out (advance)'});});
+  // Income for the month
+  let income=0,perDiemDays=0;
+  DB.sett.forEach(s=>{const d=s.weekEnding||s.date;if(inMo(d)){income+=s.gross||0;perDiemDays+=(s.perDiemDays===0||s.perDiemDays)?s.perDiemDays:7;}});
+  const total=Object.values(cats).reduce((a,x)=>a+x.total,0);
+  return {month:mo,cats,total,lumpers,income,perDiemDays};
+}
+function rAcctMonth(){
+  const sel=$('ap-month');if(!sel)return;
+  const months=acctMonths();
+  if(!sel.options.length||sel.dataset.count!=months.length){
+    sel.innerHTML=months.map(m=>`<option value="${m}">${MONTH_LABEL(m)}</option>`).join('')||'<option>No data</option>';
+    sel.dataset.count=months.length;
+  }
+  const mo=sel.value||months[0];if(!mo)return;
+  const d=acctMonthData(mo);
+  const rows=Object.entries(d.cats).sort((a,b)=>b[1].total-a[1].total).map(([cat,v])=>`
+    <tr><td style="font-weight:600">${cat}</td><td class="tm">${v.items.length}</td><td class="tm" style="color:var(--red)">${fmt(v.total)}</td></tr>
+    ${v.items.map(i=>`<tr style="font-size:11px;color:var(--mut)"><td style="padding-left:18px">${fd(i.date)} · ${i.desc}</td><td class="tm">${i.src}</td><td class="tm">${fmt(i.amount)}</td></tr>`).join('')}`).join('');
+  const lump=d.lumpers.length?`<div class="ct" style="margin-top:14px">📦 Lumper Fees</div>
+    <table class="tb"><thead><tr><th>Date</th><th>Description</th><th>Type</th><th>Amount</th></tr></thead><tbody>
+    ${d.lumpers.map(l=>`<tr><td>${fd(l.date)}</td><td>${l.desc}</td><td>${l.kind}</td><td class="tm">${fmt(l.amount)}</td></tr>`).join('')}
+    </tbody></table>`:'';
+  $('ap-monthly').innerHTML=`
+    <div class="g3" style="margin-bottom:12px">
+      <div class="sc"><div class="sl">Gross Income</div><div class="sv" style="color:var(--grn)">${fmt(d.income)}</div></div>
+      <div class="sc"><div class="sl">Deductible Expenses</div><div class="sv" style="color:var(--red)">${fmt(d.total)}</div></div>
+      <div class="sc"><div class="sl">Per Diem Days</div><div class="sv">${d.perDiemDays}</div></div>
+    </div>
+    <table class="tb"><thead><tr><th>Category / Item</th><th>Count / Source</th><th>Amount</th></tr></thead>
+    <tbody>${rows||'<tr><td colspan="3" class="empty">No expenses this month</td></tr>'}</tbody>
+    <tfoot><tr style="font-weight:700;border-top:2px solid var(--bd)"><td>TOTAL</td><td></td><td class="tm" style="color:var(--red)">${fmt(d.total)}</td></tr></tfoot></table>
+    ${lump}`;
+}
+// Excel export (real .xls via HTML table — opens natively in Excel/Sheets)
+function exportAcctExcel(fullYear){
+  const months=fullYear?acctMonths().slice().reverse():[($('ap-month')&&$('ap-month').value)||acctMonths()[0]];
+  if(!months[0]){alert('No data to export yet.');return;}
+  const biz=getBiz();
+  let html='<html xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="utf-8"></head><body>';
+  let grand=0,grandInc=0;
+  months.forEach(mo=>{
+    const d=acctMonthData(mo);grand+=d.total;grandInc+=d.income;
+    html+=`<table border="1"><tr><td colspan="5" style="font-size:16px;font-weight:bold">${biz.company} — ${MONTH_LABEL(mo)}</td></tr>
+    <tr><td colspan="5"></td></tr>
+    <tr style="font-weight:bold;background:#dbeafe"><td>Category</td><td>Date</td><td>Description</td><td>Source</td><td>Amount</td></tr>`;
+    Object.entries(d.cats).sort((a,b)=>b[1].total-a[1].total).forEach(([cat,v])=>{
+      v.items.forEach((i,ix)=>{html+=`<tr><td>${ix===0?cat:''}</td><td>${i.date||''}</td><td>${(i.desc||'').replace(/</g,'')}</td><td>${i.src}</td><td>${i.amount.toFixed(2)}</td></tr>`;});
+      html+=`<tr style="font-weight:bold;background:#f1f5f9"><td></td><td></td><td>${cat} subtotal</td><td>${v.items.length} items</td><td>${v.total.toFixed(2)}</td></tr>`;
+    });
+    html+=`<tr style="font-weight:bold;background:#fee2e2"><td colspan="4">TOTAL DEDUCTIBLE EXPENSES — ${MONTH_LABEL(mo)}</td><td>${d.total.toFixed(2)}</td></tr>
+    <tr style="font-weight:bold;background:#dcfce7"><td colspan="4">Gross income</td><td>${d.income.toFixed(2)}</td></tr>
+    <tr><td colspan="4">Per diem days on road</td><td>${d.perDiemDays}</td></tr>`;
+    if(d.lumpers.length){
+      html+=`<tr><td colspan="5"></td></tr><tr style="font-weight:bold;background:#fef3c7"><td colspan="5">LUMPER FEES</td></tr>
+      <tr style="font-weight:bold"><td>Date</td><td colspan="2">Description</td><td>Type</td><td>Amount</td></tr>`;
+      d.lumpers.forEach(l=>{html+=`<tr><td>${l.date||''}</td><td colspan="2">${(l.desc||'').replace(/</g,'')}</td><td>${l.kind}</td><td>${l.amount.toFixed(2)}</td></tr>`;});
+    }
+    html+='</table><br><br>';
+  });
+  if(months.length>1){
+    html+=`<table border="1"><tr style="font-weight:bold;background:#dbeafe"><td colspan="2">YEAR TOTAL (${months.length} months)</td></tr>
+    <tr><td>Gross income</td><td>${grandInc.toFixed(2)}</td></tr>
+    <tr><td>Deductible expenses</td><td>${grand.toFixed(2)}</td></tr>
+    <tr style="font-weight:bold"><td>Net</td><td>${(grandInc-grand).toFixed(2)}</td></tr></table>`;
+  }
+  html+='</body></html>';
+  const blob=new Blob([html],{type:'application/vnd.ms-excel'});
+  const url=URL.createObjectURL(blob);const a=document.createElement('a');
+  a.href=url;a.download=(biz.company||'expenses').replace(/[^a-z0-9]+/gi,'-')+'-'+(months.length>1?'FY':months[0])+'-expenses.xls';
+  a.click();URL.revokeObjectURL(url);
+}
+// Print-to-PDF: opens a clean, paginated report in a new window and triggers
+// the browser's print dialog (choose "Save as PDF"). No library needed.
+function exportAcctPDF(fullYear){
+  const months=fullYear?acctMonths().slice().reverse():[($('ap-month')&&$('ap-month').value)||acctMonths()[0]];
+  if(!months[0]){alert('No data to export yet.');return;}
+  const biz=getBiz();
+  const esc=s=>String(s||'').replace(/[<>&]/g,m=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[m]));
+  let grand=0,grandInc=0,body='';
+  months.forEach((mo,mi)=>{
+    const d=acctMonthData(mo);grand+=d.total;grandInc+=d.income;
+    body+=`<section${mi?' class="pb"':''}>
+      <h2>${esc(MONTH_LABEL(mo))}</h2>
+      <div class="sum">
+        <div><span>Gross income</span><b class="g">${fmt(d.income)}</b></div>
+        <div><span>Deductible expenses</span><b class="r">${fmt(d.total)}</b></div>
+        <div><span>Per diem days</span><b>${d.perDiemDays}</b></div>
+      </div>
+      <table><thead><tr><th style="width:30%">Category</th><th style="width:14%">Date</th><th>Description</th><th style="width:16%">Source</th><th style="width:14%" class="r-al">Amount</th></tr></thead><tbody>`;
+    Object.entries(d.cats).sort((a,b)=>b[1].total-a[1].total).forEach(([cat,v])=>{
+      v.items.forEach((i,ix)=>{body+=`<tr><td>${ix===0?esc(cat):''}</td><td>${esc(i.date)}</td><td>${esc(i.desc)}</td><td>${esc(i.src)}</td><td class="r-al">${fmt(i.amount)}</td></tr>`;});
+      body+=`<tr class="sub"><td></td><td></td><td>${esc(cat)} subtotal</td><td>${v.items.length} items</td><td class="r-al">${fmt(v.total)}</td></tr>`;
+    });
+    body+=`</tbody><tfoot><tr class="tot"><td colspan="4">TOTAL DEDUCTIBLE EXPENSES</td><td class="r-al">${fmt(d.total)}</td></tr></tfoot></table>`;
+    if(d.lumpers.length){
+      body+=`<h3>Lumper Fees</h3><table><thead><tr><th>Date</th><th>Description</th><th>Type</th><th class="r-al">Amount</th></tr></thead><tbody>`;
+      d.lumpers.forEach(l=>{body+=`<tr><td>${esc(l.date)}</td><td>${esc(l.desc)}</td><td>${esc(l.kind)}</td><td class="r-al">${fmt(l.amount)}</td></tr>`;});
+      body+='</tbody></table>';
+    }
+    body+='</section>';
+  });
+  if(months.length>1){
+    body+=`<section class="pb"><h2>Year Summary (${months.length} months)</h2><table><tbody>
+      <tr><td>Gross income</td><td class="r-al g">${fmt(grandInc)}</td></tr>
+      <tr><td>Deductible expenses</td><td class="r-al r">${fmt(grand)}</td></tr>
+      <tr class="tot"><td>Net</td><td class="r-al">${fmt(grandInc-grand)}</td></tr></tbody></table></section>`;
+  }
+  const w=window.open('','_blank');
+  if(!w){alert('Popup blocked — allow popups for this site, then try again.');return;}
+  w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(biz.company)} — Expense Report</title>
+  <style>
+    *{box-sizing:border-box}
+    body{font:12px/1.45 -apple-system,Segoe UI,Roboto,sans-serif;color:#111;margin:28px}
+    h1{font-size:19px;margin:0 0 2px}
+    .meta{color:#555;font-size:11px;margin-bottom:18px}
+    h2{font-size:15px;margin:18px 0 8px;padding-bottom:5px;border-bottom:2px solid #2563eb;color:#1e3a8a}
+    h3{font-size:13px;margin:16px 0 6px;color:#92400e}
+    .sum{display:flex;gap:22px;margin-bottom:10px}
+    .sum div{background:#f1f5f9;border-radius:6px;padding:7px 12px;min-width:140px}
+    .sum span{display:block;font-size:10px;color:#555;text-transform:uppercase;letter-spacing:.04em}
+    .sum b{font-size:15px}
+    table{width:100%;border-collapse:collapse;margin-bottom:10px}
+    th{background:#dbeafe;text-align:left;padding:6px 7px;font-size:11px;border:1px solid #cbd5e1}
+    td{padding:5px 7px;border:1px solid #e2e8f0;font-size:11px}
+    .r-al{text-align:right;font-variant-numeric:tabular-nums}
+    .sub td{background:#f8fafc;font-weight:600}
+    .tot td{background:#fee2e2;font-weight:700;font-size:12px}
+    .g{color:#15803d}.r{color:#b91c1c}
+    .pb{page-break-before:always}
+    tr{page-break-inside:avoid}
+    footer{margin-top:22px;padding-top:8px;border-top:1px solid #cbd5e1;font-size:10px;color:#666}
+    @page{margin:14mm}
+  </style></head><body>
+  <h1>${esc(biz.company)}</h1>
+  <div class="meta">Expense report for accountant${biz.ein?' · EIN '+esc(biz.ein):''} · generated ${new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})}</div>
+  ${body}
+  <footer>Meals are excluded (covered by the per diem deduction). Advance repayments (loan principal) and escrow/performance-bond deposits are excluded as non-deductible. Figures are from imported settlements and receipts — verify against source documents.</footer>
+  </body></html>`);
+  w.document.close();
+  setTimeout(()=>{w.focus();w.print();},400);
 }
 function genPkg(){const rev=DB.sett.reduce((a,x)=>a+(x.gross||0),0),ded=dedTotal();const assetCount=DB.ded.filter(x=>x.code==='EQUIP').length;const blob=new Blob([JSON.stringify({generated:new Date().toISOString(),company:'Graywolf Logistics LLC',owner:'Ali Bozkurt',year:2026,income:{grossRevenue:rev,deductions:ded,net:rev-ded,settlements:DB.sett.length},loans:LOANS,cards:CARDS,assets:assetCount,capitalContributions:CAPITAL.extraContributions,ownerDraws:CAPITAL.draws,rawData:DB},null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='graywolf-2026-accountant.json';a.click();URL.revokeObjectURL(url);alert('✅ Done!');}
 
