@@ -144,7 +144,7 @@ canvas{max-height:160px;}
     <div class="ni" onclick="go('settings',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M5.64 5.64a10 10 0 0 1 0 13.13"/></svg>Settings</div>
   </div>
   <div class="suser"><div class="sav">AB</div><div class="sui">Ali Bozkurt<small>Graywolf Logistics</small></div></div>
-  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.08.04-W</div>
+  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.08.04-X</div>
 </div>
 <div id="main">
   <div id="readonly-banner" style="display:none;background:var(--org);color:#000;padding:6px 18px;align-items:center;gap:8px;font-size:12px;font-weight:600">👀 View-Only Mode — you're looking, not editing. Ask the owner for changes.</div>
@@ -1544,7 +1544,11 @@ function rDash(){
   
   //  summary
   // Equipment expenses by category from Deductions
-  const equipItems=DB.ded.filter(x=>x.code==='EQUIP');
+  // Source = anything that is a physical asset purchase: the EQUIP code OR one of
+  // the asset categories (category renames used to make this list go empty while
+  // the stat cards still counted rows).
+  const AR_CATS=['Tools & Equipment','Electronics','Comfort & Sleeper','Truck Supplies & Equipment','Safety Gear & Workwear','Truck Parts','Truck Supplies','Safety Equipment'];
+  const equipItems=DB.ded.filter(x=>x.code==='EQUIP'||AR_CATS.includes(x.category||''));
   const equipTotal=equipItems.reduce((a,x)=>a+(x.amount||0),0);
   const toolsAmt=equipItems.filter(x=>x.category==='Tools & Equipment').reduce((a,x)=>a+(x.amount||0),0);
   const comfortAmt=equipItems.filter(x=>x.category==='Comfort & Sleeper').reduce((a,x)=>a+(x.amount||0),0);
@@ -2386,7 +2390,11 @@ function arFilter(cat){
 
 function rAreg(){
   // Use EQUIP deductions as the source
-  const equipItems=DB.ded.filter(x=>x.code==='EQUIP');
+  // Source = anything that is a physical asset purchase: the EQUIP code OR one of
+  // the asset categories (category renames used to make this list go empty while
+  // the stat cards still counted rows).
+  const AR_CATS=['Tools & Equipment','Electronics','Comfort & Sleeper','Truck Supplies & Equipment','Safety Gear & Workwear','Truck Parts','Truck Supplies','Safety Equipment'];
+  const equipItems=DB.ded.filter(x=>x.code==='EQUIP'||AR_CATS.includes(x.category||''));
   const total=equipItems.reduce((a,x)=>a+(x.amount||0),0);
   $('ar-cnt').textContent=equipItems.length;
   $('ar-val').textContent=fmt(total);
@@ -2398,10 +2406,10 @@ function rAreg(){
   if($('ar-avg'))$('ar-avg').textContent=equipItems.length?fmt(total/equipItems.length):fmt(0);
   
   // Category breakdown
-  const cats=['Tools & Equipment','Comfort & Sleeper','Electronics','Truck Supplies','Safety Equipment'];
+  const cats=[['Tools & Equipment'],['Comfort & Sleeper'],['Electronics'],['Truck Supplies & Equipment','Truck Supplies','Truck Parts'],['Safety Gear & Workwear','Safety Equipment']];
   const catIds=['tools','comfort','elec','supplies','safety'];
-  cats.forEach((cat,i)=>{
-    const items=equipItems.filter(x=>x.category===cat);
+  cats.forEach((names,i)=>{
+    const items=equipItems.filter(x=>names.includes(x.category||''));
     const amt=items.reduce((a,x)=>a+(x.amount||0),0);
     const el=$('arc-'+catIds[i]);if(el)el.textContent=fmt(amt);
     const cn=$('arc-'+catIds[i]+'-cnt');if(cn)cn.textContent=items.length+' items';
@@ -2411,9 +2419,13 @@ function rAreg(){
   
   const d=total;
   const catIco={'Tools & Equipment':'🔧','Safety Equipment':'🛡️','Electronics':'📷','Comfort & Sleeper':'❄️','Truck Supplies':'🏗️','Misc':'🛒'};
-  const filtered=arActiveFilter==='all'?equipItems:equipItems.filter(x=>x.category===arActiveFilter);
+  const FILTER_ALIAS={'Truck Supplies':['Truck Supplies & Equipment','Truck Supplies','Truck Parts'],'Safety Equipment':['Safety Gear & Workwear','Safety Equipment']};
+  const wanted=FILTER_ALIAS[arActiveFilter]||[arActiveFilter];
+  const filtered=arActiveFilter==='all'?equipItems:equipItems.filter(x=>wanted.includes(x.category||''));
   if(!filtered.length){
-    $('ar-tbl').innerHTML='<div class="empty">No items'+(arActiveFilter!=='all'?' in '+arActiveFilter:'')+'. Add manually below or import a store receipt PDF.</div>';
+    $('ar-tbl').innerHTML='<div class="empty">'+(equipItems.length&&arActiveFilter!=='all'
+      ?'No items in '+arActiveFilter+' — '+equipItems.length+' asset(s) exist in other categories. <b style="color:var(--acc);cursor:pointer" onclick="arFilter(\'all\')">Show all</b>'
+      :'No assets yet. Add one below or import a store receipt PDF.')+'</div>';
     return;
   }
   $('ar-tbl').innerHTML='<table><thead><tr><th>Item</th><th>Category</th><th>Store</th><th>Payment</th><th>Date</th><th>Amount</th><th>Warranty</th><th></th></tr></thead><tbody>'+filtered.map(x=>{
