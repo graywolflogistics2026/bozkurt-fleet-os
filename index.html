@@ -144,7 +144,7 @@ canvas{max-height:160px;}
     <div class="ni" onclick="go('settings',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M5.64 5.64a10 10 0 0 1 0 13.13"/></svg>Settings</div>
   </div>
   <div class="suser"><div class="sav">AB</div><div class="sui">Ali Bozkurt<small>Graywolf Logistics</small></div></div>
-  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.08.05-C</div>
+  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.08.05-D</div>
 </div>
 <div id="main">
   <div id="readonly-banner" style="display:none;background:var(--org);color:#000;padding:6px 18px;align-items:center;gap:8px;font-size:12px;font-weight:600">👀 View-Only Mode — you're looking, not editing. Ask the owner for changes.</div>
@@ -778,16 +778,17 @@ canvas{max-height:160px;}
       <div class="card">
         <div class="ct">📅 Monthly Expense Report — for your accountant</div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+          <select class="fi" id="ap-year" onchange="rAcctYear()" style="max-width:120px"></select>
           <select class="fi" id="ap-month" onchange="rAcctMonth()" style="max-width:200px"></select>
           <select class="fi" id="ap-scope" onchange="rAcctMonth()" style="max-width:230px">
             <option value="oop">💳 Out-of-Pocket only (accountant)</option>
             <option value="sett">🏦 Settlement-withheld only</option>
             <option value="all">📋 Everything combined</option>
           </select>
-          <button class="btn" onclick="exportAcctExcel()">📊 Excel (month)</button>
-          <button class="btn" onclick="exportAcctExcel(true)">📊 Excel (year)</button>
-          <button class="btn" onclick="exportAcctPDF()">📄 PDF (month)</button>
-          <button class="btn" onclick="exportAcctPDF(true)">📄 PDF (year)</button>
+          <button class="btn" onclick="exportAcctExcel()">📊 Excel — month</button>
+          <button class="btn" onclick="exportAcctExcel(true)">📊 Excel — full year</button>
+          <button class="btn" onclick="exportAcctPDF()">📄 PDF — month</button>
+          <button class="btn" onclick="exportAcctPDF(true)">📄 PDF — full year</button>
           <button class="btn" onclick="genPkg()">📦 JSON backup</button>
         </div>
         <div id="ap-monthly"><div class="empty">Import settlements and receipts to build the report</div></div>
@@ -2800,14 +2801,36 @@ function acctDelRow(store,id){
   try{cleanupOrphanedContributions(true);}catch(e){}
   rAcctMonth();rDed&&rDed();rAll&&rAll();
 }
+function acctYears(){
+  const yrs=[...new Set(acctMonths().map(m=>m.slice(0,4)))].sort().reverse();
+  const cy=String(new Date().getFullYear());
+  if(!yrs.includes(cy))yrs.unshift(cy);
+  return yrs;
+}
+function rAcctYear(){
+  // Changing the year re-scopes the month list; keeps the newest month selected.
+  const ms=$('ap-month');if(ms)ms.dataset.count='';
+  rAcctMonth();
+}
 function rAcctMonth(){
   const sel=$('ap-month');if(!sel)return;
-  const months=acctMonths();
-  if(!sel.options.length||sel.dataset.count!=months.length){
-    sel.innerHTML=months.map(m=>`<option value="${m}">${MONTH_LABEL(m)}</option>`).join('')||'<option>No data</option>';
-    sel.dataset.count=months.length;
+  // Year picker first — a report should never silently span mis-read 2017 dates.
+  const ysel=$('ap-year');
+  const years=acctYears();
+  if(ysel&&(!ysel.options.length||ysel.dataset.count!=years.length)){
+    const keep=ysel.value;
+    ysel.innerHTML=years.map(y=>`<option value="${y}">${y}${y===String(new Date().getFullYear())?' (current)':''}</option>`).join('');
+    ysel.value=years.includes(keep)?keep:(years.includes(String(new Date().getFullYear()))?String(new Date().getFullYear()):years[0]);
+    ysel.dataset.count=years.length;
   }
-  const mo=sel.value||months[0];if(!mo)return;
+  const year=(ysel&&ysel.value)||String(new Date().getFullYear());
+  const months=acctMonths().filter(m=>m.slice(0,4)===year);
+  if(!sel.options.length||sel.dataset.count!==year+':'+months.length){
+    sel.innerHTML=months.map(m=>`<option value="${m}">${MONTH_LABEL(m)}</option>`).join('')||'<option value="">No data in '+year+'</option>';
+    sel.dataset.count=year+':'+months.length;
+  }
+  const mo=sel.value||months[0];
+  if(!mo){$('ap-monthly').innerHTML='<div class="empty">No records in '+year+'. Pick another year or import documents.</div>';return;}
   const d=acctMonthData(mo);
   const badDates=[];
   Object.values(d.cats).forEach(v=>v.items.forEach(i=>{const y=+String(i.date||'').slice(0,4);if(y&&(y<2020||y>new Date().getFullYear()+1))badDates.push(i);}));
@@ -2858,8 +2881,9 @@ function rAcctMonth(){
 }
 // Excel export (real .xls via HTML table — opens natively in Excel/Sheets)
 function exportAcctExcel(fullYear){
-  const months=fullYear?acctMonths().slice().reverse():[($('ap-month')&&$('ap-month').value)||acctMonths()[0]];
-  if(!months[0]){alert('No data to export yet.');return;}
+  const yr=($('ap-year')&&$('ap-year').value)||String(new Date().getFullYear());
+  const months=fullYear?acctMonths().filter(m=>m.slice(0,4)===yr).slice().reverse():[($('ap-month')&&$('ap-month').value)||acctMonths().filter(m=>m.slice(0,4)===yr)[0]];
+  if(!months[0]){alert('No data to export for '+yr+'.');return;}
   const biz=getBiz();
   let html='<html xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="utf-8"></head><body>';
   let grand=0,grandInc=0;
@@ -2900,7 +2924,7 @@ function exportAcctExcel(fullYear){
     html+='</table><br><br>';
   });
   if(months.length>1){
-    html+=`<table border="1"><tr style="font-weight:bold;background:#dbeafe"><td colspan="2">YEAR TOTAL (${months.length} months)</td></tr>
+    html+=`<table border="1"><tr style="font-weight:bold;background:#dbeafe"><td colspan="2">${yr} TOTAL (${months.length} months)</td></tr>
     <tr><td>Gross income</td><td>${grandInc.toFixed(2)}</td></tr>
     <tr><td>Deductible expenses</td><td>${grand.toFixed(2)}</td></tr>
     <tr style="font-weight:bold"><td>Net</td><td>${(grandInc-grand).toFixed(2)}</td></tr></table>`;
@@ -2914,8 +2938,9 @@ function exportAcctExcel(fullYear){
 // Print-to-PDF: opens a clean, paginated report in a new window and triggers
 // the browser's print dialog (choose "Save as PDF"). No library needed.
 function exportAcctPDF(fullYear){
-  const months=fullYear?acctMonths().slice().reverse():[($('ap-month')&&$('ap-month').value)||acctMonths()[0]];
-  if(!months[0]){alert('No data to export yet.');return;}
+  const yr=($('ap-year')&&$('ap-year').value)||String(new Date().getFullYear());
+  const months=fullYear?acctMonths().filter(m=>m.slice(0,4)===yr).slice().reverse():[($('ap-month')&&$('ap-month').value)||acctMonths().filter(m=>m.slice(0,4)===yr)[0]];
+  if(!months[0]){alert('No data to export for '+yr+'.');return;}
   const biz=getBiz();
   const esc=s=>String(s||'').replace(/[<>&]/g,m=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[m]));
   let grand=0,grandInc=0,body='';
@@ -2956,7 +2981,7 @@ function exportAcctPDF(fullYear){
     body+='</section>';
   });
   if(months.length>1){
-    body+=`<section class="pb"><h2>Year Summary (${months.length} months)</h2><table><tbody>
+    body+=`<section class="pb"><h2>${esc(yr)} Summary (${months.length} months)</h2><table><tbody>
       <tr><td>Gross income</td><td class="r-al g">${fmt(grandInc)}</td></tr>
       <tr><td>Deductible expenses</td><td class="r-al r">${fmt(grand)}</td></tr>
       <tr class="tot"><td>Net</td><td class="r-al">${fmt(grandInc-grand)}</td></tr></tbody></table></section>`;
