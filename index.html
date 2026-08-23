@@ -144,7 +144,7 @@ canvas{max-height:160px;}
     <div class="ni" onclick="go('settings',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M5.64 5.64a10 10 0 0 1 0 13.13"/></svg>Settings</div>
   </div>
   <div class="suser"><div class="sav">AB</div><div class="sui">Ali Bozkurt<small>Graywolf Logistics</small></div></div>
-  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.08.05-B</div>
+  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.08.05-C</div>
 </div>
 <div id="main">
   <div id="readonly-banner" style="display:none;background:var(--org);color:#000;padding:6px 18px;align-items:center;gap:8px;font-size:12px;font-weight:600">👀 View-Only Mode — you're looking, not editing. Ask the owner for changes.</div>
@@ -2815,7 +2815,7 @@ function rAcctMonth(){
   const rows=Object.entries(d.cats).sort((a,b)=>b[1].total-a[1].total).map(([cat,v])=>`
     <tr><td style="font-weight:600">${cat}${schedC(cat)}</td><td class="tm">${v.items.length}</td><td class="tm" style="color:var(--red)">${fmt(v.total)}</td></tr>
     ${v.items.map(i=>`<tr style="font-size:11px;color:${i.personal?'var(--org)':'var(--mut)'}${i.personal?';background:rgba(245,158,11,.07)':''}"><td style="padding-left:18px">${fd(i.date)} · ${i.desc}${i.personal?' <span style="background:var(--org);color:#1a1f2e;border-radius:8px;padding:1px 6px;font-size:9px;font-weight:700">💰 OWNER PAID</span>':''}</td><td class="tm"><select onchange="acctRecat('${i.store}','${i.id||''}',this.value)" style="background:var(--c2);border:1px solid var(--bd);color:var(--tx);border-radius:4px;font-size:10px;padding:2px;max-width:140px" title="Change category">${DED_CATEGORIES.map(cc=>`<option${cc===cat?' selected':''}>${cc}</option>`).join('')}</select> <span class="tm" style="font-size:9px">${i.src==='Settlement'?'🏦':'💳'}</span></td><td class="tm">${fmt(i.amount)} <button onclick="acctDelRow('${i.store}','${i.id||''}')" style="background:none;border:1px solid var(--red);color:var(--red);padding:1px 5px;border-radius:4px;font-size:9px;cursor:pointer;margin-left:4px" title="Delete this row">✕</button></td></tr>`).join('')}`).join('');
-  const lump=d.lumpers.length?`<div class="ct" style="margin-top:14px">📦 Lumper Fees</div>
+  const lump=d.lumpers.length?`<div class="ct" style="margin-top:4px">📦 Lumper Fees</div>
     <table class="tb"><thead><tr><th>Date</th><th>Description</th><th>Type</th><th>Amount</th></tr></thead><tbody>
     ${d.lumpers.map(l=>`<tr><td>${fd(l.date)}</td><td>${l.desc}</td><td>${l.kind}</td><td class="tm">${fmt(l.amount)}${l.id?` <button onclick="acctDelRow('${l.store}','${l.id}')" style="background:none;border:1px solid var(--red);color:var(--red);padding:1px 5px;border-radius:4px;font-size:9px;cursor:pointer;margin-left:4px" title="Delete">✕</button>`:''}</td></tr>`).join('')}
     </tbody></table>`:'';
@@ -2848,11 +2848,11 @@ function rAcctMonth(){
     ${d.ownerPaid>0?`<div style="background:rgba(245,158,11,.1);border:1px solid var(--org);border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:12px">💰 <b style="color:var(--org)">${fmt(d.ownerPaid)}</b> of these expenses were paid with a personal card/cash — recorded as <b>Owner Contributions</b> (capital in), not company spending.</div>`:''}
     ${d.cats['Major Repairs & Overhauls']?`<div style="background:rgba(96,165,250,.1);border:1px solid var(--acc);border-radius:6px;padding:7px 10px;margin-bottom:8px;font-size:11px">🔧 <b>Major Repairs & Overhauls ${fmt(d.cats['Major Repairs & Overhauls'].total)}</b> — these may be capital improvements your CPA depreciates instead of expensing. Flagged for their review.</div>`:''}
     ${badDates.length?`<div style="background:rgba(239,68,68,.1);border:1px solid var(--red);border-radius:6px;padding:7px 10px;margin-bottom:8px;font-size:11px">🚩 <b>${badDates.length} row(s) have an impossible date</b> (e.g. ${badDates[0].date}) — the statement's YY/MM/DD header was mis-read. Reload the page to auto-repair, or fix the date on the source record before sending this to your accountant.</div>`:''}
+    ${lump}
     <div style="font-size:11px;color:var(--org);margin-bottom:6px">✏️ Review before sending: fix a wrong category with the dropdown, or delete a row with ✕ — report, Excel and PDF update instantly. 🏦 = withheld by carrier · 💳 = you paid it.</div>
     <table class="tb"><thead><tr><th>Category / Item</th><th>Count / Category fix</th><th>Amount</th></tr></thead>
     <tbody>${rows||'<tr><td colspan="3" class="empty">No expenses this month</td></tr>'}</tbody>
     <tfoot><tr style="font-weight:700;border-top:2px solid var(--bd)"><td>TOTAL</td><td></td><td class="tm" style="color:var(--red)">${fmt(d.total)}</td></tr></tfoot></table>
-    ${lump}
     ${capBlock}
     ${eqBlock}`;
 }
@@ -2867,6 +2867,10 @@ function exportAcctExcel(fullYear){
     const d=acctMonthData(mo);grand+=d.total;grandInc+=d.income;
     html+=`<table border="1"><tr><td colspan="5" style="font-size:16px;font-weight:bold">${biz.company} — ${MONTH_LABEL(mo)} — ${d.scopeLabel}</td></tr>
     <tr><td colspan="5"></td></tr>
+    ${d.lumpers.length?`<tr style="font-weight:bold;background:#fef3c7"><td colspan="5">LUMPER FEES</td></tr>
+    <tr style="font-weight:bold"><td>Date</td><td colspan="2">Description</td><td>Type</td><td>Amount</td></tr>
+    ${d.lumpers.map(l=>`<tr><td>${l.date||''}</td><td colspan="2">${(l.desc||'').replace(/</g,'')}</td><td>${l.kind}</td><td>${(l.amount||0).toFixed(2)}</td></tr>`).join('')}
+    <tr><td colspan="5"></td></tr>`:''}
     <tr style="font-weight:bold;background:#dbeafe"><td>Category</td><td>Date</td><td>Description</td><td>Paid with</td><td>Amount</td></tr>`;
     Object.entries(d.cats).sort((a,b)=>b[1].total-a[1].total).forEach(([cat,v])=>{
       v.items.forEach((i,ix)=>{const hl=i.personal?' style="background:#fef3c7"':'';html+=`<tr${hl}><td>${ix===0?cat:''}</td><td>${i.date||''}</td><td>${(i.desc||'').replace(/</g,'')}${i.personal?' [OWNER PAID]':''}</td><td>${i.personal?('💰 '+(i.payment||'Personal')):(i.payment||i.src)}</td><td>${i.amount.toFixed(2)}</td></tr>`;});
@@ -2892,11 +2896,7 @@ function exportAcctExcel(fullYear){
       d.capAssets.forEach(a=>{html+=`<tr style="background:#eff6ff"><td>${a.kind}</td><td>${a.date||''}</td><td>${(a.desc||'').replace(/</g,'')}</td><td>${a.financing||''}${a.down?' (down '+a.down.toFixed(2)+')':''}</td><td>${(a.price||0).toFixed(2)}</td></tr>`;});
       html+=`<tr style="font-weight:bold;background:#dbeafe"><td colspan="4">TOTAL CAPITAL ASSETS (Section 179 / bonus depreciation — CPA decision)</td><td>${d.capTotal.toFixed(2)}</td></tr>`;
     }
-    if(d.lumpers.length){
-      html+=`<tr><td colspan="5"></td></tr><tr style="font-weight:bold;background:#fef3c7"><td colspan="5">LUMPER FEES</td></tr>
-      <tr style="font-weight:bold"><td>Date</td><td colspan="2">Description</td><td>Type</td><td>Amount</td></tr>`;
-      d.lumpers.forEach(l=>{html+=`<tr><td>${l.date||''}</td><td colspan="2">${(l.desc||'').replace(/</g,'')}</td><td>${l.kind}</td><td>${l.amount.toFixed(2)}</td></tr>`;});
-    }
+
     html+='</table><br><br>';
   });
   if(months.length>1){
@@ -2930,6 +2930,7 @@ function exportAcctPDF(fullYear){
         <div><span>Per diem YTD ${esc(d.month.slice(0,4))}</span><b>${d.ytdDays} days · ${fmt(d.ytdPerDiemAmt)}</b></div>
       </div>
       <div style="font-size:10px;color:#555;margin:-4px 0 10px">Per diem is meals &amp; incidentals at $${d.PD_RATE}/day (80% of the $80 federal rate) for nights away from the tax home. Claimed separately from the expenses below; meal receipts are deliberately excluded to avoid double-counting.</div>
+      ${d.lumpers.length?`<h3>Lumper Fees</h3><table><thead><tr><th>Date</th><th>Description</th><th>Type</th><th class="r-al">Amount</th></tr></thead><tbody>${d.lumpers.map(l=>`<tr><td>${esc(l.date)}</td><td>${esc(l.desc)}</td><td>${esc(l.kind)}</td><td class="r-al">${fmt(l.amount)}</td></tr>`).join('')}</tbody></table>`:''}
       <table><thead><tr><th style="width:30%">Category</th><th style="width:14%">Date</th><th>Description</th><th style="width:18%">Paid with</th><th style="width:14%" class="r-al">Amount</th></tr></thead><tbody>`;
     Object.entries(d.cats).sort((a,b)=>b[1].total-a[1].total).forEach(([cat,v])=>{
       v.items.forEach((i,ix)=>{body+=`<tr${i.personal?' class="own"':''}><td>${ix===0?esc(cat):''}</td><td>${esc(i.date)}</td><td>${esc(i.desc)}${i.personal?' <b>[OWNER PAID]</b>':''}</td><td>${i.personal?'💰 '+esc(i.payment||'Personal'):esc(i.payment||i.src)}</td><td class="r-al">${fmt(i.amount)}</td></tr>`;});
@@ -2951,11 +2952,7 @@ function exportAcctPDF(fullYear){
       d.capAssets.forEach(a=>{body+=`<tr class="cap"><td>${esc(a.kind)}</td><td>${esc(a.date)}</td><td>${esc(a.desc)}</td><td>${esc(a.financing)}${a.down?' (down '+fmt(a.down)+')':''}</td><td class="r-al">${fmt(a.price)}</td></tr>`;});
       body+=`</tbody><tfoot><tr class="captot"><td colspan="4">TOTAL CAPITAL ASSETS (Section 179 / bonus depreciation — CPA decision)</td><td class="r-al">${fmt(d.capTotal)}</td></tr></tfoot></table>`;
     }
-    if(d.lumpers.length){
-      body+=`<h3>Lumper Fees</h3><table><thead><tr><th>Date</th><th>Description</th><th>Type</th><th class="r-al">Amount</th></tr></thead><tbody>`;
-      d.lumpers.forEach(l=>{body+=`<tr><td>${esc(l.date)}</td><td>${esc(l.desc)}</td><td>${esc(l.kind)}</td><td class="r-al">${fmt(l.amount)}</td></tr>`;});
-      body+='</tbody></table>';
-    }
+
     body+='</section>';
   });
   if(months.length>1){
