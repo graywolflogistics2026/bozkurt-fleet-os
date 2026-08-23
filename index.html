@@ -144,7 +144,7 @@ canvas{max-height:160px;}
     <div class="ni" onclick="go('settings',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M5.64 5.64a10 10 0 0 1 0 13.13"/></svg>Settings</div>
   </div>
   <div class="suser"><div class="sav">AB</div><div class="sui">Ali Bozkurt<small>Graywolf Logistics</small></div></div>
-  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.08.05-K</div>
+  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.08.05-L</div>
 </div>
 <div id="main">
   <div id="readonly-banner" style="display:none;background:var(--org);color:#000;padding:6px 18px;align-items:center;gap:8px;font-size:12px;font-weight:600">👀 View-Only Mode — you're looking, not editing. Ask the owner for changes.</div>
@@ -1516,7 +1516,9 @@ function resolveWeekEnding(weekEnding,printDate){
 function calcOperatingCost(){
   const buckets={Fuel:0,Maintenance:0,Insurance:0,'Permits/Taxes':0,Tolls:0,Other:0,'Truck payment':0};
   let excludedTotal=0;
-  const EXCLUDE_CAT=/advance repayment|escrow|meals \(per diem/i;
+  // Multi-year service contracts and major overhauls are capital-ish one-offs:
+  // spreading a $7,020 warranty across one month's miles distorts CPM badly.
+  const EXCLUDE_CAT=/advance repayment|escrow|meals \(per diem|warranty & service|major repairs/i;
   const bucketFor=cat=>{
     if(/fuel/i.test(cat))return'Fuel';
     if(/maintenance|parts|tire|wash|overhaul/i.test(cat))return'Maintenance';
@@ -1535,21 +1537,15 @@ function calcOperatingCost(){
   DB.maint.forEach(m=>{buckets.Maintenance+=Math.max(0,Number(m.total||0)-Number(m.covered||0));});
   (DB.tolls.ez||[]).concat(DB.tolls.dw||[]).forEach(t=>{buckets.Tolls+=Number(t.amount||0);});
   // Truck loan/lease payments belong in CPM; the purchase price never does.
-  // Only estimate from the loan schedule when the carrier is NOT already
-  // withholding the payment — otherwise the same money lands twice.
-  const withheldTruckPay=buckets['Truck payment']>0;
-  if(!withheldTruckPay){
-    (typeof LOANS!=='undefined'?LOANS:[]).forEach(l=>{
-      const pay=Number(l.payment||0);if(!(pay>0))return;
-      const weeks=DB.sett.length||0;
-      const per=/week/i.test(l.frequency||'')?pay*weeks:/month/i.test(l.frequency||'')?pay*(weeks/4.33):0;
-      if(per>0)buckets['Truck payment']+=per;
-    });
-  }
+  // NO synthetic loan estimate. It used to multiply the weekly payment by every
+  // settlement week while miles only came from weeks that had miles — which is
+  // how CPM reached $8.48/mi. Only payments actually recorded as rows count.
   const capitalPurchases=(typeof getCapAssets==='function'?getCapAssets():[]).reduce((a,x)=>a+Number(x.price||0),0);
   excludedTotal+=capitalPurchases;
   const total=Object.values(buckets).reduce((a,v)=>a+v,0);
-  return {total,buckets,excludedTotal};
+  // Settlements that carry revenue but no miles silently inflate CPM.
+  const missingMiles=DB.sett.filter(s=>Number(s.gross||0)>0&&!(Number(s.miles||0)>0)).length;
+  return {total,buckets,excludedTotal,missingMiles};
 }
 function dedTotal(){return DB.ded.reduce((a,x)=>a+(x.taxDeductible===false?0:(x.amount||0)),0);}
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,5);
@@ -1649,7 +1645,8 @@ function rDash(){
     }
     if($('d-cpm-detail')){
       const parts=Object.entries(cost.buckets).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]);
-      $('d-cpm-detail').innerHTML=parts.length?parts.map(([k,v])=>k+' $'+(v/totalMiles).toFixed(2)).join(' · ')+(cost.excludedTotal>0?` <span style="color:var(--org)">· excluded ${fmt(cost.excludedTotal)}</span>`:''):'';
+      const warn=(cpm>4||cost.missingMiles>0)?`<div style="color:var(--org);margin-top:2px">⚠️ ${cost.missingMiles>0?cost.missingMiles+' settlement(s) have revenue but no miles — CPM is overstated until you add them. ':''}${cpm>4?'A realistic CPM is $1.50–$2.50; check for missing miles or one-off costs.':''}</div>`:'';
+      $('d-cpm-detail').innerHTML=(parts.length?parts.map(([k,v])=>k+' $'+(v/totalMiles).toFixed(2)).join(' · ')+(cost.excludedTotal>0?` <span style="color:var(--org)">· excluded ${fmt(cost.excludedTotal)}</span>`:''):'')+warn;
     }
     if($('d-ppm')){$('d-ppm').textContent='$'+ppm.toFixed(2);$('d-ppm').style.color=ppm>0.5?'var(--grn)':ppm>0?'var(--org)':'var(--red)';}
   }
