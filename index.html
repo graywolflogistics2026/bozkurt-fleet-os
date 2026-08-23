@@ -144,7 +144,7 @@ canvas{max-height:160px;}
     <div class="ni" onclick="go('settings',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M5.64 5.64a10 10 0 0 1 0 13.13"/></svg>Settings</div>
   </div>
   <div class="suser"><div class="sav">AB</div><div class="sui">Ali Bozkurt<small>Graywolf Logistics</small></div></div>
-  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.08.05-L</div>
+  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.08.05-M</div>
 </div>
 <div id="main">
   <div id="readonly-banner" style="display:none;background:var(--org);color:#000;padding:6px 18px;align-items:center;gap:8px;font-size:12px;font-weight:600">👀 View-Only Mode — you're looking, not editing. Ask the owner for changes.</div>
@@ -364,6 +364,11 @@ canvas{max-height:160px;}
 
     <!-- ASSETS -->
     <div id="pg-assets" class="pg">
+      <div class="card">
+        <div class="ct">💵 Truck Cost Basis <button class="btn" style="float:right;font-size:10px;padding:3px 9px" onclick="editTruckCost()">Edit</button></div>
+        <div id="truck-cost-summary" style="font-size:12px;color:var(--mut);line-height:1.7"></div>
+        <div style="font-size:10px;color:var(--mut);margin-top:6px">Feeds cost per mile: a loan counts as its monthly payment, a paid-off truck is spread over the months you choose, and a warranty over its term — the way owner-operators actually figure CPM.</div>
+      </div>
       <div class="card"><div class="ct">Tractor</div><div id="a-tr"><div class="empty">Import PDF</div></div></div>
     </div>
 
@@ -1513,6 +1518,43 @@ function resolveWeekEnding(weekEnding,printDate){
 // price, loan PRINCIPAL treated as an asset payment, advance repayments, escrow
 // and performance bonds, meals (per diem covers them), owner draws, income taxes
 // and anything already flagged non-deductible.
+// ═══ TRUCK COST BASIS ═══
+// How owner-operators actually build CPM: FIXED costs (truck payment or
+// depreciation, warranty/service contracts, annual permits) are spread evenly
+// over months, VARIABLE costs (fuel, maintenance, tires, tolls) are what you
+// actually spent. CPM = (fixed share + variable) ÷ miles for the same period.
+function getTruckCost(){
+  const d={purchasePrice:0,financing:'paid',loanAmount:0,monthlyPayment:0,termMonths:60,depreciationMonths:60,warrantyCost:0,warrantyMonths:36};
+  try{return Object.assign(d,JSON.parse(localStorage.getItem('gw_truckcost')||'{}'));}catch(e){return d;}
+}
+function saveTruckCost(v){localStorage.setItem('gw_truckcost',JSON.stringify(v));}
+function editTruckCost(){
+  if(guardReadOnly())return;
+  const t=getTruckCost();
+  const price=parseFloat((prompt('What did the truck cost? (purchase price, $)',t.purchasePrice||'')||'').replace(/[^0-9.]/g,''));
+  if(!isFinite(price))return;
+  const fin=(prompt('Is it paid off or on a loan? Type: paid or loan',t.financing)||'').toLowerCase().trim();
+  if(!fin)return;
+  let loanAmount=0,monthlyPayment=0,termMonths=t.termMonths,depMonths=t.depreciationMonths;
+  if(fin==='loan'){
+    loanAmount=parseFloat((prompt('Loan amount ($)',t.loanAmount||price)||'').replace(/[^0-9.]/g,''))||0;
+    monthlyPayment=parseFloat((prompt('Monthly payment ($)',t.monthlyPayment||'')||'').replace(/[^0-9.]/g,''))||0;
+    termMonths=parseInt((prompt('Loan term in months',t.termMonths||60)||'').replace(/[^0-9]/g,''))||60;
+  }else{
+    depMonths=parseInt((prompt('Spread the truck cost over how many months? (typical 36-60)',t.depreciationMonths||60)||'').replace(/[^0-9]/g,''))||60;
+  }
+  const wCost=parseFloat((prompt('Extended warranty / service contract cost ($, 0 if none)',t.warrantyCost||'0')||'').replace(/[^0-9.]/g,''))||0;
+  const wMonths=wCost>0?(parseInt((prompt('Warranty term in months (e.g. 36)',t.warrantyMonths||36)||'').replace(/[^0-9]/g,''))||36):36;
+  saveTruckCost({purchasePrice:price,financing:fin==='loan'?'loan':'paid',loanAmount,monthlyPayment,termMonths,depreciationMonths:depMonths,warrantyCost:wCost,warrantyMonths:wMonths});
+  rDash();rAssets&&rAssets();
+  alert('✅ Saved. Your cost per mile now spreads these over time instead of dumping them into one month.');
+}
+// Months of activity covered by the imported settlements (weeks / 4.33).
+function periodMonths(){
+  const weeks=new Set();
+  DB.sett.forEach(s=>{const w=s.weekEnding||s.date;if(w)weeks.add(w);});
+  return Math.max(weeks.size/4.333,0.25);
+}
 function calcOperatingCost(){
   const buckets={Fuel:0,Maintenance:0,Insurance:0,'Permits/Taxes':0,Tolls:0,Other:0,'Truck payment':0};
   let excludedTotal=0;
@@ -1542,6 +1584,17 @@ function calcOperatingCost(){
   // how CPM reached $8.48/mi. Only payments actually recorded as rows count.
   const capitalPurchases=(typeof getCapAssets==='function'?getCapAssets():[]).reduce((a,x)=>a+Number(x.price||0),0);
   excludedTotal+=capitalPurchases;
+  // FIXED COSTS spread over the period instead of hitting one month:
+  // • loan: the monthly payment  • paid off: purchase price ÷ chosen months
+  // • warranty/service contract: cost ÷ its term
+  const tc=getTruckCost(), months=periodMonths();
+  let fixedMonthly=0;
+  if(tc.financing==='loan'&&tc.monthlyPayment>0)fixedMonthly+=tc.monthlyPayment;
+  else if(tc.purchasePrice>0&&tc.depreciationMonths>0)fixedMonthly+=tc.purchasePrice/tc.depreciationMonths;
+  if(tc.warrantyCost>0&&tc.warrantyMonths>0)fixedMonthly+=tc.warrantyCost/tc.warrantyMonths;
+  // Don't double-count a payment the carrier already withholds.
+  if(buckets['Truck payment']>0&&tc.financing==='loan')fixedMonthly-=Math.min(fixedMonthly,tc.monthlyPayment);
+  if(fixedMonthly>0)buckets['Truck payment']+=fixedMonthly*months;
   const total=Object.values(buckets).reduce((a,v)=>a+v,0);
   // Settlements that carry revenue but no miles silently inflate CPM.
   const missingMiles=DB.sett.filter(s=>Number(s.gross||0)>0&&!(Number(s.miles||0)>0)).length;
@@ -1645,8 +1698,12 @@ function rDash(){
     }
     if($('d-cpm-detail')){
       const parts=Object.entries(cost.buckets).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]);
-      const warn=(cpm>4||cost.missingMiles>0)?`<div style="color:var(--org);margin-top:2px">⚠️ ${cost.missingMiles>0?cost.missingMiles+' settlement(s) have revenue but no miles — CPM is overstated until you add them. ':''}${cpm>4?'A realistic CPM is $1.50–$2.50; check for missing miles or one-off costs.':''}</div>`:'';
-      $('d-cpm-detail').innerHTML=(parts.length?parts.map(([k,v])=>k+' $'+(v/totalMiles).toFixed(2)).join(' · ')+(cost.excludedTotal>0?` <span style="color:var(--org)">· excluded ${fmt(cost.excludedTotal)}</span>`:''):'')+warn;
+      // Keep the card clean: label only, full breakdown on hover/long-press.
+      const warn=(cpm>4||cost.missingMiles>0)?`<span style="color:var(--org)">⚠️ check miles</span>`:'';
+      $('d-cpm-detail').innerHTML='fixed + variable ÷ total miles '+warn;
+      $('d-cpm-detail').title=parts.map(([k,v])=>k+': '+fmt(v)+' ($'+(v/totalMiles).toFixed(2)+'/mi)').join('\n')+
+        (cost.excludedTotal>0?'\nExcluded one-offs: '+fmt(cost.excludedTotal):'')+
+        (cost.missingMiles>0?'\n⚠️ '+cost.missingMiles+' settlement(s) have revenue but no miles — CPM is overstated until you add them.':'');
     }
     if($('d-ppm')){$('d-ppm').textContent='$'+ppm.toFixed(2);$('d-ppm').style.color=ppm>0.5?'var(--grn)':ppm>0?'var(--org)':'var(--red)';}
   }
@@ -2310,7 +2367,24 @@ function warrantyCellHtml(x){
   const label=w.cls==='expired'?'Expired '+w.end:(w.days+'d left \u00b7 '+w.end);
   return'<span style="color:'+col+';font-size:10px;font-weight:600">\ud83d\udee1\ufe0f '+x.warrantyYears+'y \u2014 '+label+'</span>';
 }
-function rAssets(){const t=DB.assets.tr;$('a-tr').innerHTML=t?`<table><tbody><tr><td class="tm">Unit #</td><td>${t.unit||'—'}</td></tr><tr><td class="tm">Year/Make/Model</td><td>${t.year||''} ${t.make||''} ${t.model||''}</td></tr><tr><td class="tm">VIN</td><td>${t.vin||'—'}</td></tr><tr><td class="tm">Odometer</td><td>${(t.odometer||0).toLocaleString()} mi</td></tr></tbody></table>`:'<div class="empty">Import PDF</div>';}
+function rAssets(){
+  const _tc=getTruckCost(),_m=periodMonths();
+  if($('truck-cost-summary')){
+    if(!_tc.purchasePrice&&!_tc.monthlyPayment&&!_tc.warrantyCost){
+      $('truck-cost-summary').innerHTML='<span style="color:var(--org)">Not set — tap Edit so your cost per mile includes the truck.</span>';
+    }else{
+      const rows=[];
+      if(_tc.financing==='loan'){
+        rows.push('Truck: '+fmt(_tc.purchasePrice)+' · <b>loan</b> '+fmt(_tc.monthlyPayment)+'/mo'+(_tc.termMonths?' × '+_tc.termMonths+' mo':''));
+      }else{
+        rows.push('Truck: '+fmt(_tc.purchasePrice)+' · <b>paid off</b> — spread over '+_tc.depreciationMonths+' mo = '+fmt(_tc.purchasePrice/(_tc.depreciationMonths||1))+'/mo');
+      }
+      if(_tc.warrantyCost>0)rows.push('Extended warranty: '+fmt(_tc.warrantyCost)+' ÷ '+_tc.warrantyMonths+' mo = '+fmt(_tc.warrantyCost/(_tc.warrantyMonths||1))+'/mo');
+      const fixedMo=(_tc.financing==='loan'?_tc.monthlyPayment:(_tc.purchasePrice/(_tc.depreciationMonths||1)))+(_tc.warrantyCost>0?_tc.warrantyCost/(_tc.warrantyMonths||1):0);
+      rows.push('<b style="color:var(--acc)">Fixed truck cost: '+fmt(fixedMo)+'/month</b>');
+      $('truck-cost-summary').innerHTML=rows.join('<br>');
+    }
+  }const t=DB.assets.tr;$('a-tr').innerHTML=t?`<table><tbody><tr><td class="tm">Unit #</td><td>${t.unit||'—'}</td></tr><tr><td class="tm">Year/Make/Model</td><td>${t.year||''} ${t.make||''} ${t.model||''}</td></tr><tr><td class="tm">VIN</td><td>${t.vin||'—'}</td></tr><tr><td class="tm">Odometer</td><td>${(t.odometer||0).toLocaleString()} mi</td></tr></tbody></table>`:'<div class="empty">Import PDF</div>';}
 function rOper(){
   // Totals = what is ACTUALLY in the system (must equal the detail lines below).
   // Prime prints its own YTD figures on each settlement (DB.op.ytd*) — those are
