@@ -144,7 +144,7 @@ canvas{max-height:160px;}
     <div class="ni" onclick="go('settings',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M5.64 5.64a10 10 0 0 1 0 13.13"/></svg>Settings</div>
   </div>
   <div class="suser"><div class="sav">AB</div><div class="sui">Ali Bozkurt<small>Graywolf Logistics</small></div></div>
-  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.08.04-C</div>
+  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.08.04-E</div>
 </div>
 <div id="main">
   <div id="readonly-banner" style="display:none;background:var(--org);color:#000;padding:6px 18px;align-items:center;gap:8px;font-size:12px;font-weight:600">👀 View-Only Mode — you're looking, not editing. Ask the owner for changes.</div>
@@ -1900,7 +1900,9 @@ function syncHealthFromMaint(silent){
   return any;
 }
 function rTolls(){const ez=DB.tolls.ez.reduce((a,x)=>a+(x.amount||0),0),dw=DB.tolls.dw.reduce((a,x)=>a+(x.amount||0),0);$('t-ez').textContent=fmt(ez);$('t-dw').textContent=fmt(dw);$('t-tot').textContent=fmt(ez+dw);const tt=(arr,id)=>{$(id).innerHTML=arr.length?'<div style="max-height:180px;overflow-y:auto">'+arr.map(x=>`<div class="cf"><span class="tm">${x.date?fd(x.date)+' — ':''} ${x.location||'—'}</span><span>${fmt(x.amount)}</span></div>`).join('')+'</div>':'<div class="empty">Import PDF</div>';};tt(DB.tolls.ez,'t-eztbl');tt(DB.tolls.dw,'t-dwtbl');}
-const DED_CATEGORIES=['Software & Subscriptions','Legal & Accounting Fees','Insurance','Licensing & Permits','Tools & Equipment','Electronics','Comfort & Sleeper','Truck Supplies','Safety Equipment','Misc','Other'];
+// Schedule-C aligned taxonomy — same 29 categories as the mobile app so an
+// accountant sees consistent buckets no matter which platform produced the report.
+const DED_CATEGORIES=['Fuel & DEF','Maintenance & Repairs','Truck Wash & Detailing','Tires','Truck/Trailer Payments','Insurance—Truck','Insurance—Health','Permits, Licenses & Road Taxes','Tolls & Scales','Parking & Lodging','ELD & Communications','Software & Subscriptions','Dispatch & Factoring Fees','Professional Services','Office & Admin','Safety Gear & Workwear','Truck Supplies & Equipment','Tools & Equipment','Electronics','Comfort & Sleeper','Contract Labor (1099)','Wages & Payroll Taxes','Bank & Merchant Fees','Advertising','Training & Education','Association Dues','Lease & Rent','Utilities & Subscriptions','Meals (per diem covered)','Advance Repayment','Escrow & Deposits','Misc'];
 // Splits deductions into two classes with different tax treatment:
 // - "settlement" source: withheld from payroll by Prime (ELD, insurance, truck payment...).
 //   Already reflected in NET pay — shown for visibility but NOT counted again as a tax
@@ -2385,9 +2387,10 @@ function acctMonthData(mo,scopeArg){
   const wantOOP=scope==='oop'||scope==='all', wantSett=scope==='sett'||scope==='all';
   const inMo=d=>d&&d.slice(0,7)===mo;
   const cats={};
-  const add=(cat,amt,desc,date,src)=>{
+  const add=(cat,amt,desc,date,src,id,payment)=>{
     if(!cats[cat])cats[cat]={total:0,items:[]};
-    cats[cat].total+=amt;cats[cat].items.push({desc,amount:amt,date,src});
+    const personal=isPersonalPayment(payment);
+    cats[cat].total+=amt;cats[cat].items.push({desc,amount:amt,date,src,id,payment:payment||'',personal});
   };
   // Deductions (skip non-deductible: meals/per-diem, advance repayments, escrow)
   DB.ded.forEach(x=>{
@@ -2395,7 +2398,7 @@ function acctMonthData(mo,scopeArg){
     const isSett=x.source==='settlement';
     if(isSett&&!wantSett)return;
     if(!isSett&&!wantOOP)return;
-    add(x.category||'Misc',x.amount||0,x.desc||x.code||'—',x.date,isSett?'Settlement':'Out-of-pocket');
+    add(x.category||'Misc',x.amount||0,x.desc||x.code||'—',x.date,isSett?'Settlement':'Out-of-pocket',x.id,x.payment);
   });
   // Fuel
   // Fuel/maintenance/tolls that came from a settlement are carrier-withheld;
@@ -2416,8 +2419,20 @@ function acctMonthData(mo,scopeArg){
   let income=0,perDiemDays=0;
   DB.sett.forEach(s=>{const d=s.weekEnding||s.date;if(inMo(d)){income+=s.gross||0;perDiemDays+=(s.perDiemDays===0||s.perDiemDays)?s.perDiemDays:7;}});
   const total=Object.values(cats).reduce((a,x)=>a+x.total,0);
+  let ownerPaid=0;
+  Object.values(cats).forEach(v=>v.items.forEach(i=>{if(i.personal)ownerPaid+=i.amount;}));
   const scopeLabel=scope==='oop'?'Out-of-pocket expenses only':scope==='sett'?'Settlement-withheld only':'All expenses combined';
-  return {month:mo,cats,total,lumpers,income,perDiemDays,scope,scopeLabel};
+  return {month:mo,cats,total,lumpers,income,perDiemDays,scope,scopeLabel,ownerPaid};
+}
+// Fix a miscategorized row straight from the accountant report — no need to
+// hunt for it on the Deductions page before sending the file out.
+function acctRecat(id,cat){
+  const row=DB.ded.find(x=>x.id===id);
+  if(!row){alert('Row not found');return;}
+  row.category=cat;
+  if(cat==='Meals (per diem covered)'||cat==='Advance Repayment'||cat==='Escrow & Deposits')row.taxDeductible=false;
+  else if(row.taxDeductible===false)row.taxDeductible=true;
+  saveDB();rAcctMonth();rDed&&rDed();
 }
 function rAcctMonth(){
   const sel=$('ap-month');if(!sel)return;
@@ -2430,7 +2445,7 @@ function rAcctMonth(){
   const d=acctMonthData(mo);
   const rows=Object.entries(d.cats).sort((a,b)=>b[1].total-a[1].total).map(([cat,v])=>`
     <tr><td style="font-weight:600">${cat}</td><td class="tm">${v.items.length}</td><td class="tm" style="color:var(--red)">${fmt(v.total)}</td></tr>
-    ${v.items.map(i=>`<tr style="font-size:11px;color:var(--mut)"><td style="padding-left:18px">${fd(i.date)} · ${i.desc}</td><td class="tm">${i.src}</td><td class="tm">${fmt(i.amount)}</td></tr>`).join('')}`).join('');
+    ${v.items.map(i=>`<tr style="font-size:11px;color:${i.personal?'var(--org)':'var(--mut)'}${i.personal?';background:rgba(245,158,11,.07)':''}"><td style="padding-left:18px">${fd(i.date)} · ${i.desc}${i.personal?' <span style="background:var(--org);color:#1a1f2e;border-radius:8px;padding:1px 6px;font-size:9px;font-weight:700">💰 OWNER PAID</span>':''}</td><td class="tm">${i.id?`<select onchange="acctRecat('${i.id}',this.value)" style="background:var(--c2);border:1px solid var(--bd);color:var(--tx);border-radius:4px;font-size:10px;padding:2px;max-width:150px" title="Fix the category before sending to your accountant">${DED_CATEGORIES.map(cc=>`<option${cc===cat?' selected':''}>${cc}</option>`).join('')}</select>`:i.src}</td><td class="tm">${fmt(i.amount)}</td></tr>`).join('')}`).join('');
   const lump=d.lumpers.length?`<div class="ct" style="margin-top:14px">📦 Lumper Fees</div>
     <table class="tb"><thead><tr><th>Date</th><th>Description</th><th>Type</th><th>Amount</th></tr></thead><tbody>
     ${d.lumpers.map(l=>`<tr><td>${fd(l.date)}</td><td>${l.desc}</td><td>${l.kind}</td><td class="tm">${fmt(l.amount)}</td></tr>`).join('')}
@@ -2442,7 +2457,9 @@ function rAcctMonth(){
       <div class="sc"><div class="sl">Deductible Expenses</div><div class="sv" style="color:var(--red)">${fmt(d.total)}</div></div>
       <div class="sc"><div class="sl">Per Diem Days</div><div class="sv">${d.perDiemDays}</div></div>
     </div>
-    <table class="tb"><thead><tr><th>Category / Item</th><th>Count / Source</th><th>Amount</th></tr></thead>
+    ${d.ownerPaid>0?`<div style="background:rgba(245,158,11,.1);border:1px solid var(--org);border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:12px">💰 <b style="color:var(--org)">${fmt(d.ownerPaid)}</b> of these expenses were paid with a personal card/cash — recorded as <b>Owner Contributions</b> (capital in), not company spending.</div>`:''}
+    <div style="font-size:11px;color:var(--org);margin-bottom:6px">✏️ Review before sending: change any wrong category with the dropdown next to the item — the report, Excel and PDF update instantly.</div>
+    <table class="tb"><thead><tr><th>Category / Item</th><th>Count / Category fix</th><th>Amount</th></tr></thead>
     <tbody>${rows||'<tr><td colspan="3" class="empty">No expenses this month</td></tr>'}</tbody>
     <tfoot><tr style="font-weight:700;border-top:2px solid var(--bd)"><td>TOTAL</td><td></td><td class="tm" style="color:var(--red)">${fmt(d.total)}</td></tr></tfoot></table>
     ${lump}`;
@@ -2458,14 +2475,15 @@ function exportAcctExcel(fullYear){
     const d=acctMonthData(mo);grand+=d.total;grandInc+=d.income;
     html+=`<table border="1"><tr><td colspan="5" style="font-size:16px;font-weight:bold">${biz.company} — ${MONTH_LABEL(mo)} — ${d.scopeLabel}</td></tr>
     <tr><td colspan="5"></td></tr>
-    <tr style="font-weight:bold;background:#dbeafe"><td>Category</td><td>Date</td><td>Description</td><td>Source</td><td>Amount</td></tr>`;
+    <tr style="font-weight:bold;background:#dbeafe"><td>Category</td><td>Date</td><td>Description</td><td>Paid with</td><td>Amount</td></tr>`;
     Object.entries(d.cats).sort((a,b)=>b[1].total-a[1].total).forEach(([cat,v])=>{
-      v.items.forEach((i,ix)=>{html+=`<tr><td>${ix===0?cat:''}</td><td>${i.date||''}</td><td>${(i.desc||'').replace(/</g,'')}</td><td>${i.src}</td><td>${i.amount.toFixed(2)}</td></tr>`;});
+      v.items.forEach((i,ix)=>{const hl=i.personal?' style="background:#fef3c7"':'';html+=`<tr${hl}><td>${ix===0?cat:''}</td><td>${i.date||''}</td><td>${(i.desc||'').replace(/</g,'')}${i.personal?' [OWNER PAID]':''}</td><td>${i.personal?('💰 '+(i.payment||'Personal')):(i.payment||i.src)}</td><td>${i.amount.toFixed(2)}</td></tr>`;});
       html+=`<tr style="font-weight:bold;background:#f1f5f9"><td></td><td></td><td>${cat} subtotal</td><td>${v.items.length} items</td><td>${v.total.toFixed(2)}</td></tr>`;
     });
     html+=`<tr style="font-weight:bold;background:#fee2e2"><td colspan="4">TOTAL DEDUCTIBLE EXPENSES — ${MONTH_LABEL(mo)}</td><td>${d.total.toFixed(2)}</td></tr>
     <tr style="font-weight:bold;background:#dcfce7"><td colspan="4">Gross income</td><td>${d.income.toFixed(2)}</td></tr>
-    <tr><td colspan="4">Per diem days on road</td><td>${d.perDiemDays}</td></tr>`;
+    <tr><td colspan="4">Per diem days on road</td><td>${d.perDiemDays}</td></tr>
+    ${d.ownerPaid>0?`<tr style="font-weight:bold;background:#fef3c7"><td colspan="4">Of which paid personally by owner (Owner Contribution / capital in)</td><td>${d.ownerPaid.toFixed(2)}</td></tr>`:''}`;
     if(d.lumpers.length){
       html+=`<tr><td colspan="5"></td></tr><tr style="font-weight:bold;background:#fef3c7"><td colspan="5">LUMPER FEES</td></tr>
       <tr style="font-weight:bold"><td>Date</td><td colspan="2">Description</td><td>Type</td><td>Amount</td></tr>`;
@@ -2502,12 +2520,12 @@ function exportAcctPDF(fullYear){
         <div><span>Deductible expenses</span><b class="r">${fmt(d.total)}</b></div>
         <div><span>Per diem days</span><b>${d.perDiemDays}</b></div>
       </div>
-      <table><thead><tr><th style="width:30%">Category</th><th style="width:14%">Date</th><th>Description</th><th style="width:16%">Source</th><th style="width:14%" class="r-al">Amount</th></tr></thead><tbody>`;
+      <table><thead><tr><th style="width:30%">Category</th><th style="width:14%">Date</th><th>Description</th><th style="width:18%">Paid with</th><th style="width:14%" class="r-al">Amount</th></tr></thead><tbody>`;
     Object.entries(d.cats).sort((a,b)=>b[1].total-a[1].total).forEach(([cat,v])=>{
-      v.items.forEach((i,ix)=>{body+=`<tr><td>${ix===0?esc(cat):''}</td><td>${esc(i.date)}</td><td>${esc(i.desc)}</td><td>${esc(i.src)}</td><td class="r-al">${fmt(i.amount)}</td></tr>`;});
+      v.items.forEach((i,ix)=>{body+=`<tr${i.personal?' class="own"':''}><td>${ix===0?esc(cat):''}</td><td>${esc(i.date)}</td><td>${esc(i.desc)}${i.personal?' <b>[OWNER PAID]</b>':''}</td><td>${i.personal?'💰 '+esc(i.payment||'Personal'):esc(i.payment||i.src)}</td><td class="r-al">${fmt(i.amount)}</td></tr>`;});
       body+=`<tr class="sub"><td></td><td></td><td>${esc(cat)} subtotal</td><td>${v.items.length} items</td><td class="r-al">${fmt(v.total)}</td></tr>`;
     });
-    body+=`</tbody><tfoot><tr class="tot"><td colspan="4">TOTAL DEDUCTIBLE EXPENSES</td><td class="r-al">${fmt(d.total)}</td></tr></tfoot></table>`;
+    body+=`</tbody><tfoot><tr class="tot"><td colspan="4">TOTAL DEDUCTIBLE EXPENSES</td><td class="r-al">${fmt(d.total)}</td></tr>${d.ownerPaid>0?`<tr class="own tot2"><td colspan="4">— of which paid personally by owner (Owner Contribution / capital in)</td><td class="r-al">${fmt(d.ownerPaid)}</td></tr>`:''}</tfoot></table>`;
     if(d.lumpers.length){
       body+=`<h3>Lumper Fees</h3><table><thead><tr><th>Date</th><th>Description</th><th>Type</th><th class="r-al">Amount</th></tr></thead><tbody>`;
       d.lumpers.forEach(l=>{body+=`<tr><td>${esc(l.date)}</td><td>${esc(l.desc)}</td><td>${esc(l.kind)}</td><td class="r-al">${fmt(l.amount)}</td></tr>`;});
@@ -2542,6 +2560,8 @@ function exportAcctPDF(fullYear){
     .sub td{background:#f8fafc;font-weight:600}
     .tot td{background:#fee2e2;font-weight:700;font-size:12px}
     .g{color:#15803d}.r{color:#b91c1c}
+    .own td{background:#fef3c7}
+    .tot2 td{font-weight:700;color:#92400e}
     .pb{page-break-before:always}
     tr{page-break-inside:avoid}
     footer{margin-top:22px;padding-top:8px;border-top:1px solid #cbd5e1;font-size:10px;color:#666}
@@ -2550,7 +2570,7 @@ function exportAcctPDF(fullYear){
   <h1>${esc(biz.company)}</h1>
   <div class="meta">Expense report for accountant${biz.ein?' · EIN '+esc(biz.ein):''} · generated ${new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})}</div>
   ${body}
-  <footer>Meals are excluded (covered by the per diem deduction). Advance repayments (loan principal) and escrow/performance-bond deposits are excluded as non-deductible. Figures are from imported settlements and receipts — verify against source documents.</footer>
+  <footer>Meals are excluded (covered by the per diem deduction). Advance repayments (loan principal) and escrow/performance-bond deposits are excluded as non-deductible. Rows marked <b>OWNER PAID</b> (amber) were paid with a personal card or cash and are recorded as Owner Contributions — capital contributed to the business, not company funds. Figures are from imported settlements and receipts — verify against source documents.</footer>
   </body></html>`);
   w.document.close();
   setTimeout(()=>{w.focus();w.print();},400);
@@ -2915,7 +2935,7 @@ Return ONLY JSON.`;
 async function handleFile(file){
   if(window._checkingMode){await importCheckingStatement(file);return;}
   if(window._bankStmtMode){await importBankStatement(file);return;}if(!file)return;
-  if(file.size>10*1024*1024){alert('This file is '+(file.size/1048576).toFixed(1)+' MB — the limit is 10 MB.\n\nTry exporting a smaller PDF or splitting it into pages.');return;}$('dz').style.display='none';$('progbox').style.display='block';$('rprev').style.display='none';const st=$('steps');st.innerHTML='';for(let i=0;i<STEPS.length-1;i++){await new Promise(r=>setTimeout(r,250));st.innerHTML+=`<div class="pstep"><div class="dot ok">✓</div><span>${STEPS[i]}</span></div>`;}st.innerHTML+=`<div class="pstep"><div class="dot sp"></div><span>${STEPS[STEPS.length-1]}</span></div>`;try{const b64=await toB64(file);const isImg=file.type.startsWith('image/');const mt=file.type||'application/pdf';const prompt=`Parse this document for Graywolf Logistics LLC (Ali Bozkurt, Prime Inc. owner-operator, Unit 830157). Return ONLY raw JSON starting with { ending with }. No markdown.\n\ndocType: settlement|fuel|maintenance|amazon|store|toll|loan|other\n\nFor settlement: {"docType":"settlement","date":"YYYY-MM-DD","vendor":"","totalAmount":0,"taxDeductible":true,"bizPct":100,"summary":"","settlement":{"weekEnding":"","printDate":"YYYY-MM-DD","carrier":"","unit":"","grossRevenue":0,"reimbursements":0,"totalDeductions":0,"netPay":0,"totalMiles":0,"loadedMiles":0,"revenueItems":[{"desc":"","order":"","amount":0}],"reimbursementItems":[{"desc":"","ref":"","amount":0}],"loads":[{"order":"","from":"","to":"","pickupDate":"YYYY-MM-DD","deliveryDate":"YYYY-MM-DD","loadedMiles":0,"emptyMiles":0,"revenue":0,"rate":0,"shipper":""}],"tractorFuel":[{"date":"","location":"","gallons":0,"amount":0,"discount":0}],"reeferFuel":[{"date":"","location":"","gallons":0,"amount":0,"discount":0}],"deductions":[{"code":"","desc":"","balance":0,"amount":0,"category":"Software & Subscriptions|Legal & Accounting Fees|Insurance|Licensing & Permits|Fixed|Variable|Advance Repayment|Escrow & Deposits|Other","taxDeductible":true}],"maintenance":[{"invoice":"","unit":"","desc":"","odometer":0,"serviceType":"oil|fuel|valve|dpf|def|coolext|coolant|trans|tires|brakes|general|other","parts":0,"labor":0,"total":0,"covered":0}],"tolls":{"ezpass":{"total":0,"items":[]},"drivewyze":{"total":0,"items":[]}},"loans":[{"name":"","balance":0,"payment":0,"frequency":"","nextDue":""}],"assets":{"tractor":{"unit":"","year":"","make":"","model":"","vin":"","license":"","odometer":0},"apu":{"unit":"","make":"","model":"","vin":"","hours":0,"rental":0}},"operating":{"ytdRevenue":0,"ytdExpenses":0,"ytdNet":0,"weeksInService":0}}}\n\nDATE RULES (anchor method): carrier statements print TWO header dates - "SETTLEMENTS DATE: 26/07/17" (YY/MM/DD, ambiguous, this is the weekEnding) and "DATE: 7/16/26" (M/D/YY, unambiguous print date, usually 1 day BEFORE the settlement date). ALSO return the print date as settlement.printDate (ISO). Resolve weekEnding by choosing the reading of SETTLEMENTS DATE that falls within [printDate, printDate+7 days] and shares its year: printDate 2026-07-16 + "26/07/17" = 2026-07-17 (never 2017-07-26, never 2024-07-26). If no reading fits, leave weekEnding empty. Never invent a date from today. All other dates: ISO YYYY-MM-DD, plausible year 2020..next year.\n\nSETTLEMENT FUEL RULES (strict): tractorFuel/reeferFuel arrays are ONLY for lines explicitly labeled TRACTOR FUEL / TRACTOR DEF / REEFER FUEL with gallons purchased. NEVER put these in fuel arrays: ADVANCE, ADV FOR OUTSIDE LUMPER, CASH ADVANCE, COMPANY STORE, or any advance/repayment line - those belong in deductions[] with their exact description (a lumper advance is money advanced to pay a lumper, NOT fuel, even when it shares the same station/location code as fuel lines). REEF FUEL DSCNT / fuel discount lines are the discount field of the matching fuel purchase, not separate rows.\n\nADVANCE RULES (critical, prevents double-counting): the settlement REIMBURSEMENT section is a generic CREDITS section - PERSONAL PAYMNT lines are the owner's own money sent in (not income) and ADVANCE lines there are loans issued (not income); still list them in reimbursementItems with exact desc. In the DEDUCTION section, plain ADVANCE repayment lines (desc ADVANCE, usually showing a remaining balance, e.g. weekly $500 repaying an EXT WARRANTY PURCHASE advance or a company-store advance) are LOAN PRINCIPAL REPAYMENTS, NOT expenses: set their category to "Advance Repayment" and add "taxDeductible":false on that deduction item - the real expense is the purchase line itself (e.g. EXTEND WR PURCH). Exception: ADV FOR OUTSIDE LUMPER is the actual lumper payment (deductible expense, matches the OUTSIDE LUMPER income line) - keep it deductible.\n\nMILES RULE (critical): use ONLY this week\'s miles from the revenue section totals. NEVER use "LTD MILES" (lifetime), "MILES QTD" (quarter) or any YTD figure - a week with no loads has totalMiles 0 even when LTD MILES prints 445.\n\nNET PAY RULE: netPay is SIGNED. A week can be NEGATIVE (deductions exceed revenue - "NET AMOUNT DUE UNIT: 1,155.35-" or a trailing minus means the owner OWES the carrier). Output it as a negative number, never as a positive or zero.\n\nESCROW RULE: performance bond, escrow, tire fund, emergency fund, maintenance reserve deductions are REFUNDABLE DEPOSITS held by the carrier (they appear under the carrier\'s receivables), NOT expenses: set category "Escrow & Deposits" and "taxDeductible":false.\n\nMEAL RULES: restaurant/cafe/food purchases (truck-stop restaurants, Prime point-of-sale meals, cafes, grills-as-restaurants, diners) are covered by the per-diem deduction and must NEVER be counted as separate expenses: set category "Meals (per diem covered)" and "taxDeductible":false on those lines (still list them - they are real withholdings). Do not confuse a restaurant grill with a truck grille part (vehicle part = deductible equipment).\n\nFor fuel: {"docType":"fuel","date":"","vendor":"","totalAmount":0,"taxDeductible":true,"summary":"","fuel":{"type":"tractor","station":"","location":"","gallons":0,"pricePerGallon":0,"gross":0,"discount":0,"net":0}}\n\nFor maintenance: {"docType":"maintenance","date":"","vendor":"","totalAmount":0,"taxDeductible":true,"summary":"","maintenance":{"invoice":"","shop":"","unit":"","description":"","odometer":0,"serviceType":"oil|fuel|valve|dpf|def|coolext|coolant|trans|tires|brakes|general|other","parts":0,"labor":0,"total":0,"warrantyCredit":0,"netCost":0}}\n\n
+  if(file.size>10*1024*1024){alert('This file is '+(file.size/1048576).toFixed(1)+' MB — the limit is 10 MB.\n\nTry exporting a smaller PDF or splitting it into pages.');return;}$('dz').style.display='none';$('progbox').style.display='block';$('rprev').style.display='none';const st=$('steps');st.innerHTML='';for(let i=0;i<STEPS.length-1;i++){await new Promise(r=>setTimeout(r,250));st.innerHTML+=`<div class="pstep"><div class="dot ok">✓</div><span>${STEPS[i]}</span></div>`;}st.innerHTML+=`<div class="pstep"><div class="dot sp"></div><span>${STEPS[STEPS.length-1]}</span></div>`;try{const b64=await toB64(file);const isImg=file.type.startsWith('image/');const mt=file.type||'application/pdf';const prompt=`Parse this document for Graywolf Logistics LLC (Ali Bozkurt, Prime Inc. owner-operator, Unit 830157). Return ONLY raw JSON starting with { ending with }. No markdown.\n\ndocType: settlement|fuel|maintenance|amazon|store|toll|loan|other\n\nFor settlement: {"docType":"settlement","date":"YYYY-MM-DD","vendor":"","totalAmount":0,"taxDeductible":true,"bizPct":100,"summary":"","settlement":{"weekEnding":"","printDate":"YYYY-MM-DD","carrier":"","unit":"","grossRevenue":0,"reimbursements":0,"totalDeductions":0,"netPay":0,"totalMiles":0,"loadedMiles":0,"revenueItems":[{"desc":"","order":"","amount":0}],"reimbursementItems":[{"desc":"","ref":"","amount":0}],"loads":[{"order":"","from":"","to":"","pickupDate":"YYYY-MM-DD","deliveryDate":"YYYY-MM-DD","loadedMiles":0,"emptyMiles":0,"revenue":0,"rate":0,"shipper":""}],"tractorFuel":[{"date":"","location":"","gallons":0,"amount":0,"discount":0}],"reeferFuel":[{"date":"","location":"","gallons":0,"amount":0,"discount":0}],"deductions":[{"code":"","desc":"","balance":0,"amount":0,"category":"Software & Subscriptions|Legal & Accounting Fees|Insurance|Licensing & Permits|Fixed|Variable|Advance Repayment|Escrow & Deposits|Other","taxDeductible":true}],"maintenance":[{"invoice":"","unit":"","desc":"","odometer":0,"serviceType":"oil|fuel|valve|dpf|def|coolext|coolant|trans|tires|brakes|general|other","parts":0,"labor":0,"total":0,"covered":0}],"tolls":{"ezpass":{"total":0,"items":[]},"drivewyze":{"total":0,"items":[]}},"loans":[{"name":"","balance":0,"payment":0,"frequency":"","nextDue":""}],"assets":{"tractor":{"unit":"","year":"","make":"","model":"","vin":"","license":"","odometer":0},"apu":{"unit":"","make":"","model":"","vin":"","hours":0,"rental":0}},"operating":{"ytdRevenue":0,"ytdExpenses":0,"ytdNet":0,"weeksInService":0}}}\n\nDATE RULES (anchor method): carrier statements print TWO header dates - "SETTLEMENTS DATE: 26/07/17" (YY/MM/DD, ambiguous, this is the weekEnding) and "DATE: 7/16/26" (M/D/YY, unambiguous print date, usually 1 day BEFORE the settlement date). ALSO return the print date as settlement.printDate (ISO). Resolve weekEnding by choosing the reading of SETTLEMENTS DATE that falls within [printDate, printDate+7 days] and shares its year: printDate 2026-07-16 + "26/07/17" = 2026-07-17 (never 2017-07-26, never 2024-07-26). If no reading fits, leave weekEnding empty. Never invent a date from today. All other dates: ISO YYYY-MM-DD, plausible year 2020..next year.\n\nSETTLEMENT FUEL RULES (strict): tractorFuel/reeferFuel arrays are ONLY for lines explicitly labeled TRACTOR FUEL / TRACTOR DEF / REEFER FUEL with gallons purchased. NEVER put these in fuel arrays: ADVANCE, ADV FOR OUTSIDE LUMPER, CASH ADVANCE, COMPANY STORE, or any advance/repayment line - those belong in deductions[] with their exact description (a lumper advance is money advanced to pay a lumper, NOT fuel, even when it shares the same station/location code as fuel lines). REEF FUEL DSCNT / fuel discount lines are the discount field of the matching fuel purchase, not separate rows.\n\nADVANCE RULES (critical, prevents double-counting): the settlement REIMBURSEMENT section is a generic CREDITS section - PERSONAL PAYMNT lines are the owner's own money sent in (not income) and ADVANCE lines there are loans issued (not income); still list them in reimbursementItems with exact desc. In the DEDUCTION section, plain ADVANCE repayment lines (desc ADVANCE, usually showing a remaining balance, e.g. weekly $500 repaying an EXT WARRANTY PURCHASE advance or a company-store advance) are LOAN PRINCIPAL REPAYMENTS, NOT expenses: set their category to "Advance Repayment" and add "taxDeductible":false on that deduction item - the real expense is the purchase line itself (e.g. EXTEND WR PURCH). Exception: ADV FOR OUTSIDE LUMPER is the actual lumper payment (deductible expense, matches the OUTSIDE LUMPER income line) - keep it deductible.\n\nCATEGORY LIST (use EXACTLY one of these for every expense): Fuel & DEF | Maintenance & Repairs | Truck Wash & Detailing | Tires | Truck/Trailer Payments | Insurance-Truck | Insurance-Health | Permits, Licenses & Road Taxes | Tolls & Scales | Parking & Lodging | ELD & Communications | Software & Subscriptions | Dispatch & Factoring Fees | Professional Services | Office & Admin | Safety Gear & Workwear | Truck Supplies & Equipment | Tools & Equipment | Electronics | Comfort & Sleeper | Contract Labor (1099) | Wages & Payroll Taxes | Bank & Merchant Fees | Advertising | Training & Education | Association Dues | Lease & Rent | Utilities & Subscriptions | Meals (per diem covered) | Advance Repayment | Escrow & Deposits | Misc.\nCATEGORY HINTS: truck wash/washout/detailing/"CAB, REAR FRAME AND ENGINE WASHED" = Truck Wash & Detailing (NOT Maintenance & Repairs, which is for mechanical parts/labor). Oil change, brakes, DPF, belts, RO parts/repair = Maintenance & Repairs. Scale tickets, EZ-Pass, PrePass, Drivewyze = Tolls & Scales. Qualcomm/Geotab/ELD rental = ELD & Communications. Accounting service, CPA, attorney, drug consortium = Professional Services. Federal highway tax, IFTA, IRP, 2290, license/permits = Permits, Licenses & Road Taxes. Company store personal items = Misc. Never invent a category outside the list.\n\nMILES RULE (critical): use ONLY this week\'s miles from the revenue section totals. NEVER use "LTD MILES" (lifetime), "MILES QTD" (quarter) or any YTD figure - a week with no loads has totalMiles 0 even when LTD MILES prints 445.\n\nNET PAY RULE: netPay is SIGNED. A week can be NEGATIVE (deductions exceed revenue - "NET AMOUNT DUE UNIT: 1,155.35-" or a trailing minus means the owner OWES the carrier). Output it as a negative number, never as a positive or zero.\n\nESCROW RULE: performance bond, escrow, tire fund, emergency fund, maintenance reserve deductions are REFUNDABLE DEPOSITS held by the carrier (they appear under the carrier\'s receivables), NOT expenses: set category "Escrow & Deposits" and "taxDeductible":false.\n\nMEAL RULES: restaurant/cafe/food purchases (truck-stop restaurants, Prime point-of-sale meals, cafes, grills-as-restaurants, diners) are covered by the per-diem deduction and must NEVER be counted as separate expenses: set category "Meals (per diem covered)" and "taxDeductible":false on those lines (still list them - they are real withholdings). Do not confuse a restaurant grill with a truck grille part (vehicle part = deductible equipment).\n\nFor fuel: {"docType":"fuel","date":"","vendor":"","totalAmount":0,"taxDeductible":true,"summary":"","fuel":{"type":"tractor","station":"","location":"","gallons":0,"pricePerGallon":0,"gross":0,"discount":0,"net":0}}\n\nFor maintenance: {"docType":"maintenance","date":"","vendor":"","totalAmount":0,"taxDeductible":true,"summary":"","maintenance":{"invoice":"","shop":"","unit":"","description":"","odometer":0,"serviceType":"oil|fuel|valve|dpf|def|coolext|coolant|trans|tires|brakes|general|other","parts":0,"labor":0,"total":0,"warrantyCredit":0,"netCost":0}}\n\n
 For amazon/walmart/homedepot/harborfright/store receipts use docType "amazon" (this is just an internal category name covering ALL store purchases, not literally Amazon):
 {"docType":"amazon","date":"","vendor":"","totalAmount":0,"taxDeductible":true,"bizPct":100,"summary":"","purchase":{"orderNumber":"","items":[{"name":"","qty":1,"price":0,"warrantyYears":null,"warrantyFor":null}],"subtotal":0,"tax":0,"total":0,"paymentMethod":"Business Credit Card"}}
 IMPORTANT: "vendor" MUST be the ACTUAL store/company name read from the document (logo, header, footer, or website URL shown) — e.g. "Home Depot", "Walmart", "AutoZone", "Amazon.com". Never default to "Amazon" unless the receipt genuinely is from Amazon. If a photo is blurry and the name truly cannot be read, set vendor to "Unknown Store" rather than guessing a specific brand.
@@ -3546,6 +3566,15 @@ window.addEventListener('load',()=>{
       }
     });
     if(escFix>0){saveDB();console.log('Marked',escFix,'escrow/bond lines as refundable deposits');}
+    // Pass 8 (2026-08-04): washes are their own Schedule C line, not mechanical repair.
+    let washFix=0;
+    const washRe=/\bwash(ed|ing)?\b|washout|detail(ing)?\b|truck wash/i;
+    DB.ded.forEach(x=>{
+      if(washRe.test(x.desc||'')&&x.category!=='Truck Wash & Detailing'&&!/washer fluid|windshield/i.test(x.desc||'')){
+        x.category='Truck Wash & Detailing';washFix++;
+      }
+    });
+    if(washFix>0){saveDB();console.log('Re-filed',washFix,'wash lines');}
   }catch(e){console.error('tax-merge:',e);}
   // One-time migration: older imports didn't tag settlement-withheld deductions. Any deduction
   // whose date matches a settlement AND has no payment/source info is treated as withheld.
