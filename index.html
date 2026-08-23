@@ -144,7 +144,7 @@ canvas{max-height:160px;}
     <div class="ni" onclick="go('settings',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M5.64 5.64a10 10 0 0 1 0 13.13"/></svg>Settings</div>
   </div>
   <div class="suser"><div class="sav">AB</div><div class="sui">Ali Bozkurt<small>Graywolf Logistics</small></div></div>
-  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.08.04-Z</div>
+  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.08.05-A</div>
 </div>
 <div id="main">
   <div id="readonly-banner" style="display:none;background:var(--org);color:#000;padding:6px 18px;align-items:center;gap:8px;font-size:12px;font-weight:600">👀 View-Only Mode — you're looking, not editing. Ask the owner for changes.</div>
@@ -2801,6 +2801,9 @@ function rAcctMonth(){
   }
   const mo=sel.value||months[0];if(!mo)return;
   const d=acctMonthData(mo);
+  const badDates=[];
+  Object.values(d.cats).forEach(v=>v.items.forEach(i=>{const y=+String(i.date||'').slice(0,4);if(y&&(y<2020||y>new Date().getFullYear()+1))badDates.push(i);}));
+  d.lumpers.forEach(l=>{const y=+String(l.date||'').slice(0,4);if(y&&(y<2020||y>new Date().getFullYear()+1))badDates.push(l);});
   const rows=Object.entries(d.cats).sort((a,b)=>b[1].total-a[1].total).map(([cat,v])=>`
     <tr><td style="font-weight:600">${cat}${schedC(cat)}</td><td class="tm">${v.items.length}</td><td class="tm" style="color:var(--red)">${fmt(v.total)}</td></tr>
     ${v.items.map(i=>`<tr style="font-size:11px;color:${i.personal?'var(--org)':'var(--mut)'}${i.personal?';background:rgba(245,158,11,.07)':''}"><td style="padding-left:18px">${fd(i.date)} · ${i.desc}${i.personal?' <span style="background:var(--org);color:#1a1f2e;border-radius:8px;padding:1px 6px;font-size:9px;font-weight:700">💰 OWNER PAID</span>':''}</td><td class="tm"><select onchange="acctRecat('${i.store}','${i.id||''}',this.value)" style="background:var(--c2);border:1px solid var(--bd);color:var(--tx);border-radius:4px;font-size:10px;padding:2px;max-width:140px" title="Change category">${DED_CATEGORIES.map(cc=>`<option${cc===cat?' selected':''}>${cc}</option>`).join('')}</select> <span class="tm" style="font-size:9px">${i.src==='Settlement'?'🏦':'💳'}</span></td><td class="tm">${fmt(i.amount)} <button onclick="acctDelRow('${i.store}','${i.id||''}')" style="background:none;border:1px solid var(--red);color:var(--red);padding:1px 5px;border-radius:4px;font-size:9px;cursor:pointer;margin-left:4px" title="Delete this row">✕</button></td></tr>`).join('')}`).join('');
@@ -2832,6 +2835,7 @@ function rAcctMonth(){
     </div>
     ${d.ownerPaid>0?`<div style="background:rgba(245,158,11,.1);border:1px solid var(--org);border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:12px">💰 <b style="color:var(--org)">${fmt(d.ownerPaid)}</b> of these expenses were paid with a personal card/cash — recorded as <b>Owner Contributions</b> (capital in), not company spending.</div>`:''}
     ${d.cats['Major Repairs & Overhauls']?`<div style="background:rgba(96,165,250,.1);border:1px solid var(--acc);border-radius:6px;padding:7px 10px;margin-bottom:8px;font-size:11px">🔧 <b>Major Repairs & Overhauls ${fmt(d.cats['Major Repairs & Overhauls'].total)}</b> — these may be capital improvements your CPA depreciates instead of expensing. Flagged for their review.</div>`:''}
+    ${badDates.length?`<div style="background:rgba(239,68,68,.1);border:1px solid var(--red);border-radius:6px;padding:7px 10px;margin-bottom:8px;font-size:11px">🚩 <b>${badDates.length} row(s) have an impossible date</b> (e.g. ${badDates[0].date}) — the statement's YY/MM/DD header was mis-read. Reload the page to auto-repair, or fix the date on the source record before sending this to your accountant.</div>`:''}
     <div style="font-size:11px;color:var(--org);margin-bottom:6px">✏️ Review before sending: fix a wrong category with the dropdown, or delete a row with ✕ — report, Excel and PDF update instantly. 🏦 = withheld by carrier · 💳 = you paid it.</div>
     <table class="tb"><thead><tr><th>Category / Item</th><th>Count / Category fix</th><th>Amount</th></tr></thead>
     <tbody>${rows||'<tr><td colspan="3" class="empty">No expenses this month</td></tr>'}</tbody>
@@ -4032,6 +4036,31 @@ window.addEventListener('load',()=>{
       }
     });
     if(lodgeFix>0){saveDB();console.log('Re-filed',lodgeFix,'lodging lines');}
+    // Pass 15 (2026-08-04): repair stored dates the AI mis-read (YY/MM/DD read as
+    // a year, e.g. "26/07/17" saved as 2017-07-26). Uses the same swap rule as the
+    // import guard, anchored on the settlement week when we can find one.
+    let dateFix=0;
+    const plausible=s=>{if(!/^\d{4}-\d{2}-\d{2}$/.test(s||''))return false;const y=+s.slice(0,4);const maxY=new Date().getFullYear()+1;return y>=2020&&y<=maxY;};
+    const swapYearDay=s=>{
+      const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(s||'');if(!m)return null;
+      const y=+m[1],mo=m[2],d=+m[3];
+      const alt=(2000+d)+'-'+mo+'-'+String(y-2000).padStart(2,'0');
+      return /^\d{4}-\d{2}-\d{2}$/.test(alt)&&plausible(alt)?alt:null;
+    };
+    const fixDates=(arr,fields)=>{arr.forEach(row=>{fields.forEach(f=>{
+      const v=row[f];
+      if(v&&!plausible(v)){const alt=swapYearDay(v);if(alt){row[f]=alt;dateFix++;}}
+    });});};
+    fixDates(DB.sett,['date','weekEnding']);
+    fixDates(DB.loads,['date','pickupDate','deliveryDate']);
+    fixDates(DB.ded,['date']);
+    fixDates(DB.reimb,['date']);
+    fixDates(DB.fuel.tr,['date']);
+    fixDates(DB.fuel.re,['date']);
+    fixDates(DB.maint,['date']);
+    fixDates(DB.tolls.ez||[],['date']);
+    fixDates(DB.tolls.dw||[],['date']);
+    if(dateFix>0){saveDB();console.log('Repaired',dateFix,'implausible dates (YY/MM/DD mis-reads)');}
     // Pass 14 (2026-08-04): the old hard-coded $60,000 base was being ADDED to the
     // explicit contribution rows, inflating the total. Contributions now come from
     // rows only; warn if the seeded row is missing so nothing silently vanishes.
