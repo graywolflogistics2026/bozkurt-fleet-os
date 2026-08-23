@@ -144,7 +144,7 @@ canvas{max-height:160px;}
     <div class="ni" onclick="go('settings',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M5.64 5.64a10 10 0 0 1 0 13.13"/></svg>Settings</div>
   </div>
   <div class="suser"><div class="sav">AB</div><div class="sui">Ali Bozkurt<small>Graywolf Logistics</small></div></div>
-  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.08.04-U</div>
+  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.08.04-W</div>
 </div>
 <div id="main">
   <div id="readonly-banner" style="display:none;background:var(--org);color:#000;padding:6px 18px;align-items:center;gap:8px;font-size:12px;font-weight:600">👀 View-Only Mode — you're looking, not editing. Ask the owner for changes.</div>
@@ -175,7 +175,7 @@ canvas{max-height:160px;}
       <div class="g4" style="margin-bottom:12px">
         <div class="sc"><div class="sl">Business Balance</div><div class="sv ta" id="d-bizbal">$60,000.00</div><div class="sch">checking account</div></div>
         <div class="sc"><div class="sl">Revenue / Mile</div><div class="sv tg" id="d-rpm">—</div><div class="sch">gross ÷ total miles</div></div>
-        <div class="sc"><div class="sl">Cost / Mile (CPM)</div><div class="sv tr" id="d-cpm">—</div><div class="sch">all costs ÷ total miles</div></div>
+        <div class="sc"><div class="sl">Cost / Mile (CPM)</div><div class="sv tr" id="d-cpm">—</div><div class="sch" id="d-cpm-detail" style="font-size:9px;line-height:1.35">operating costs ÷ total miles</div></div>
         <div class="sc"><div class="sl">Profit / Mile</div><div class="sv" id="d-ppm">—</div><div class="sch">accept loads above CPM!</div></div>
       </div>
 
@@ -1467,6 +1467,47 @@ function resolveWeekEnding(weekEnding,printDate){
   }
   return fixDocDate(weekEnding);
 }
+// TRUE operating cost for CPM — what it actually costs to run a mile.
+// INCLUDED: fuel/DEF/additives, maintenance, parts, tires, insurance, permits &
+// road taxes, tolls, parking/lodging, ELD & software, dispatch/factoring, dues,
+// professional services, driver pay, and the truck LOAN PAYMENT (or lease).
+// EXCLUDED (these are not cost-of-operating a mile): the truck/trailer PURCHASE
+// price, loan PRINCIPAL treated as an asset payment, advance repayments, escrow
+// and performance bonds, meals (per diem covers them), owner draws, income taxes
+// and anything already flagged non-deductible.
+function calcOperatingCost(){
+  const buckets={Fuel:0,Maintenance:0,Insurance:0,'Permits/Taxes':0,Tolls:0,Other:0,'Truck payment':0};
+  let excludedTotal=0;
+  const EXCLUDE_CAT=/advance repayment|escrow|meals \(per diem/i;
+  const bucketFor=cat=>{
+    if(/fuel/i.test(cat))return'Fuel';
+    if(/maintenance|parts|tire|wash|overhaul/i.test(cat))return'Maintenance';
+    if(/insurance/i.test(cat))return'Insurance';
+    if(/permit|licens|road tax/i.test(cat))return'Permits/Taxes';
+    if(/toll|scale/i.test(cat))return'Tolls';
+    if(/truck\/trailer payment|lease/i.test(cat))return'Truck payment';
+    return'Other';
+  };
+  DB.ded.forEach(x=>{
+    const amt=Number(x.amount||0);if(!(amt>0))return;
+    if(x.taxDeductible===false||EXCLUDE_CAT.test(x.category||'')){excludedTotal+=amt;return;}
+    buckets[bucketFor(x.category||'')]+=amt;
+  });
+  DB.fuel.tr.concat(DB.fuel.re).forEach(f=>{buckets.Fuel+=Math.max(0,Number(f.amount||0)-Number(f.discount||0));});
+  DB.maint.forEach(m=>{buckets.Maintenance+=Math.max(0,Number(m.total||0)-Number(m.covered||0));});
+  (DB.tolls.ez||[]).concat(DB.tolls.dw||[]).forEach(t=>{buckets.Tolls+=Number(t.amount||0);});
+  // Truck loan/lease payments belong in CPM; the purchase price never does.
+  (typeof LOANS!=='undefined'?LOANS:[]).forEach(l=>{
+    const pay=Number(l.payment||0);if(!(pay>0))return;
+    const weeks=DB.sett.length||0;
+    const per=/week/i.test(l.frequency||'')?pay*weeks:/month/i.test(l.frequency||'')?pay*(weeks/4.33):0;
+    if(per>0)buckets['Truck payment']+=per;
+  });
+  const capitalPurchases=(typeof getCapAssets==='function'?getCapAssets():[]).reduce((a,x)=>a+Number(x.price||0),0);
+  excludedTotal+=capitalPurchases;
+  const total=Object.values(buckets).reduce((a,v)=>a+v,0);
+  return {total,buckets,excludedTotal};
+}
 function dedTotal(){return DB.ded.reduce((a,x)=>a+(x.taxDeductible===false?0:(x.amount||0)),0);}
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,5);
 const fd=d=>{if(!d)return'—';try{return new Date(d+'T12:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});}catch{return d;}};
@@ -1546,10 +1587,17 @@ function rDash(){
   const totalMiles=DB.sett.reduce((a,x)=>a+(x.miles||0),0);
   if(totalMiles>0){
     const grossRev=DB.sett.reduce((a,x)=>a+(x.gross||0),0);
-    const totalCost=dedTotal();
-    const rpm=grossRev/totalMiles,cpm=totalCost/totalMiles,ppm=rpm-cpm;
+    const cost=calcOperatingCost();
+    const rpm=grossRev/totalMiles,cpm=cost.total/totalMiles,ppm=rpm-cpm;
     if($('d-rpm'))$('d-rpm').textContent='$'+rpm.toFixed(2);
-    if($('d-cpm'))$('d-cpm').textContent='$'+cpm.toFixed(2);
+    if($('d-cpm')){
+      $('d-cpm').textContent='$'+cpm.toFixed(2);
+      $('d-cpm').title='Operating costs '+fmt(cost.total)+' ÷ '+totalMiles.toLocaleString()+' mi'+(cost.excludedTotal>0?'\nExcluded (not operating costs): '+fmt(cost.excludedTotal):'');
+    }
+    if($('d-cpm-detail')){
+      const parts=Object.entries(cost.buckets).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]);
+      $('d-cpm-detail').innerHTML=parts.length?parts.map(([k,v])=>k+' $'+(v/totalMiles).toFixed(2)).join(' · ')+(cost.excludedTotal>0?` <span style="color:var(--org)">· excluded ${fmt(cost.excludedTotal)}</span>`:''):'';
+    }
     if($('d-ppm')){$('d-ppm').textContent='$'+ppm.toFixed(2);$('d-ppm').style.color=ppm>0.5?'var(--grn)':ppm>0?'var(--org)':'var(--red)';}
   }
 
@@ -2003,10 +2051,16 @@ function markHealthDone(type,label){
   if(v===null)return;
   const num=parseInt(String(v).replace(/[^0-9]/g,''))||0;
   const today=new Date().toISOString().slice(0,10);
-  const rec={id:uid(),date:today,invoice:'',unit:DB.assets.tr.unit||'',desc:label+' — marked as done (self-service, no invoice)',parts:0,labor:0,total:0,covered:false,odo:isApu?(h.odo||0):num,apuHours:isApu?num:undefined,type};
+  // Ask what it cost. $0 = you did it yourself with nothing purchased — that's
+  // service history, not an expense, so it stays out of the accountant report.
+  const costRaw=prompt('What did it cost you out of pocket? (parts/supplies — enter 0 if nothing)','0');
+  if(costRaw===null)return;
+  const cost=parseFloat(String(costRaw).replace(/[^0-9.]/g,''))||0;
+  const rec={id:uid(),date:today,invoice:'',unit:DB.assets.tr.unit||'',desc:label+(cost>0?' — self-service (parts/supplies purchased)':' — marked as done (self-service, no cost)'),parts:cost,labor:0,total:cost,covered:false,odo:isApu?(h.odo||0):num,apuHours:isApu?num:undefined,type,source:'manual'};
   DB.maint.push(rec);
   applyMaintToHealth(rec);
-  saveDB();rAll();
+  saveDB();rAll();try{rAcctMonth();}catch(e){}
+  if(cost>0)alert('✅ Logged — '+fmt(cost)+' will appear as an out-of-pocket expense in your accountant report.');
 }
 function applyMaintToHealth(rec){
   if(!rec)return false;
@@ -2598,6 +2652,7 @@ function acctMonthData(mo,scopeArg){
     const isSett=x.source==='settlement';
     if(isSett&&!wantSett)return;
     if(!isSett&&!wantOOP)return;
+    if(!(Number(x.amount||0)>0))return; // zero-dollar entries are not expenses
     add(x.category||'Misc',x.amount||0,x.desc||x.code||'—',x.date,isSett?'Settlement':'Out-of-pocket',x.id,x.payment,'ded');
   });
   // Fuel
@@ -2605,11 +2660,13 @@ function acctMonthData(mo,scopeArg){
   // ones you paid yourself are out-of-pocket. _batch marks settlement origin.
   const originOK=x=>{const isSett=!!x._batch||x.source==='settlement';return isSett?wantSett:wantOOP;};
   const settOrigin=x=>!!x._batch||x.source==='settlement';
-  DB.fuel.tr.forEach(f=>{if(inMo(f.date)&&originOK(f))add('Fuel & DEF',(f.amount||0)-(f.discount||0),'Tractor fuel — '+(f.location||''),f.date,(settOrigin(f)?'Settlement':'Out-of-pocket'),f.id,'','fuel.tr');});
-  DB.fuel.re.forEach(f=>{if(inMo(f.date)&&originOK(f))add('Fuel & DEF',(f.amount||0)-(f.discount||0),'Reefer fuel — '+(f.location||''),f.date,(settOrigin(f)?'Settlement':'Out-of-pocket'),f.id,'','fuel.re');});
-  DB.maint.forEach(m=>{if(inMo(m.date)&&originOK(m))add('Maintenance & Repairs',(m.total||0)-(m.covered||0),m.desc||m.invoice||'Service',m.date,(settOrigin(m)?'Settlement':'Out-of-pocket'),m.id,'','maint');});
-  (DB.tolls.ez||[]).forEach(t=>{if(inMo(t.date)&&originOK(t))add('Tolls & Scales',t.amount||0,'EZ-Pass — '+(t.location||''),t.date,(settOrigin(t)?'Settlement':'Out-of-pocket'),t.id,'','tolls.ez');});
-  (DB.tolls.dw||[]).forEach(t=>{if(inMo(t.date)&&originOK(t))add('Tolls & Scales',t.amount||0,'Drivewyze — '+(t.location||''),t.date,(settOrigin(t)?'Settlement':'Out-of-pocket'),t.id,'','tolls.dw');});
+  DB.fuel.tr.forEach(f=>{const n=(f.amount||0)-(f.discount||0);if(inMo(f.date)&&originOK(f)&&n>0)add('Fuel & DEF',n,'Tractor fuel — '+(f.location||''),f.date,(settOrigin(f)?'Settlement':'Out-of-pocket'),f.id,'','fuel.tr');});
+  DB.fuel.re.forEach(f=>{const n=(f.amount||0)-(f.discount||0);if(inMo(f.date)&&originOK(f)&&n>0)add('Fuel & DEF',n,'Reefer fuel — '+(f.location||''),f.date,(settOrigin(f)?'Settlement':'Out-of-pocket'),f.id,'','fuel.re');});
+  // $0 rows (self-service "Mark as Done" maintenance, comped items) are history,
+  // not expenses — they never belong in an accountant's expense report.
+  DB.maint.forEach(m=>{const net=(m.total||0)-(m.covered||0);if(inMo(m.date)&&originOK(m)&&net>0)add('Maintenance & Repairs',net,m.desc||m.invoice||'Service',m.date,(settOrigin(m)?'Settlement':'Out-of-pocket'),m.id,'','maint');});
+  (DB.tolls.ez||[]).forEach(t=>{if(inMo(t.date)&&originOK(t)&&Number(t.amount||0)>0)add('Tolls & Scales',t.amount||0,'EZ-Pass — '+(t.location||''),t.date,(settOrigin(t)?'Settlement':'Out-of-pocket'),t.id,'','tolls.ez');});
+  (DB.tolls.dw||[]).forEach(t=>{if(inMo(t.date)&&originOK(t)&&Number(t.amount||0)>0)add('Tolls & Scales',t.amount||0,'Drivewyze — '+(t.location||''),t.date,(settOrigin(t)?'Settlement':'Out-of-pocket'),t.id,'','tolls.dw');});
   // Lumper fees — accountant wants these called out separately (they appear as
   // reimbursements/income AND as the advance that paid them)
   const lumperRe=/lumper/i;
