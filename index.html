@@ -144,7 +144,7 @@ canvas{max-height:160px;}
     <div class="ni" onclick="go('settings',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M5.64 5.64a10 10 0 0 1 0 13.13"/></svg>Settings</div>
   </div>
   <div class="suser"><div class="sav">AB</div><div class="sui">Ali Bozkurt<small>Graywolf Logistics</small></div></div>
-  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.08.05-A</div>
+  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.08.05-B</div>
 </div>
 <div id="main">
   <div id="readonly-banner" style="display:none;background:var(--org);color:#000;padding:6px 18px;align-items:center;gap:8px;font-size:12px;font-weight:600">👀 View-Only Mode — you're looking, not editing. Ask the owner for changes.</div>
@@ -2720,8 +2720,16 @@ function acctMonthData(mo,scopeArg){
   DB.reimb.forEach(r=>{if(inMo(r.date)&&lumperRe.test(r.desc||''))lumpers.push({desc:r.desc,amount:r.amount||0,date:r.date,kind:'Reimbursed to you',id:r.id,store:'reimb'});});
   DB.ded.forEach(x=>{if(inMo(x.date)&&lumperRe.test(x.desc||''))lumpers.push({desc:x.desc,amount:x.amount||0,date:x.date,kind:'Paid out (advance)',id:x.id,store:'ded'});});
   // Income for the month
-  let income=0,perDiemDays=0;
-  DB.sett.forEach(s=>{const d=s.weekEnding||s.date;if(inMo(d)){income+=s.gross||0;perDiemDays+=(s.perDiemDays===0||s.perDiemDays)?s.perDiemDays:7;}});
+  let income=0,perDiemDays=0,ytdDays=0,ytdIncome=0;
+  const yr=mo.slice(0,4);
+  DB.sett.forEach(s=>{
+    const dt=s.weekEnding||s.date;if(!dt)return;
+    const days=(s.perDiemDays===0||s.perDiemDays)?s.perDiemDays:7;
+    if(inMo(dt)){income+=s.gross||0;perDiemDays+=days;}
+    if(dt.slice(0,4)===yr){ytdDays+=days;ytdIncome+=s.gross||0;}
+  });
+  const PD_RATE=64; // $80 full rate, 80% deductible
+  const perDiemAmt=perDiemDays*PD_RATE, ytdPerDiemAmt=ytdDays*PD_RATE;
   const total=Object.values(cats).reduce((a,x)=>a+x.total,0);
   // Owner's equity movements for the month — contributions in, draws out.
   const eqContrib=(CAPITAL.extraContributions||[]).filter(x=>inMo(x.date));
@@ -2733,7 +2741,7 @@ function acctMonthData(mo,scopeArg){
   let ownerPaid=0;
   Object.values(cats).forEach(v=>v.items.forEach(i=>{if(i.personal)ownerPaid+=i.amount;}));
   const scopeLabel=scope==='oop'?'Out-of-pocket expenses only':scope==='sett'?'Settlement-withheld only':'All expenses combined';
-  return {month:mo,cats,total,lumpers,income,perDiemDays,scope,scopeLabel,ownerPaid,capAssets,capTotal,eqContrib,eqDraws,eqContribTotal,eqDrawTotal};
+  return {month:mo,cats,total,lumpers,income,perDiemDays,perDiemAmt,ytdDays,ytdPerDiemAmt,ytdIncome,PD_RATE,scope,scopeLabel,ownerPaid,capAssets,capTotal,eqContrib,eqDraws,eqContribTotal,eqDrawTotal};
 }
 // Fix a miscategorized row straight from the accountant report — no need to
 // hunt for it on the Deductions page before sending the file out.
@@ -2831,7 +2839,11 @@ function rAcctMonth(){
     <div class="g3" style="margin-bottom:12px">
       <div class="sc"><div class="sl">Gross Income</div><div class="sv" style="color:var(--grn)">${fmt(d.income)}</div></div>
       <div class="sc"><div class="sl">Deductible Expenses</div><div class="sv" style="color:var(--red)">${fmt(d.total)}</div></div>
-      <div class="sc"><div class="sl">Per Diem Days</div><div class="sv">${d.perDiemDays}</div></div>
+      <div class="sc"><div class="sl">Per Diem — this month</div><div class="sv">${d.perDiemDays} <span style="font-size:12px;color:var(--mut)">days</span></div><div class="sch">${fmt(d.perDiemAmt)} deductible @ $${d.PD_RATE}/day</div></div>
+    </div>
+    <div style="background:rgba(96,165,250,.08);border:1px solid var(--acc);border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:12px">
+      🗓️ <b>Per diem ${d.month.slice(0,4)} year-to-date: ${d.ytdDays} days = ${fmt(d.ytdPerDiemAmt)}</b>
+      <span style="color:var(--mut);font-size:11px">(this month ${d.perDiemDays} days / ${fmt(d.perDiemAmt)}) — meals & incidentals at $${d.PD_RATE}/day (80% of $80). Claimed separately from the expenses below; meal receipts are excluded.</span>
     </div>
     ${d.ownerPaid>0?`<div style="background:rgba(245,158,11,.1);border:1px solid var(--org);border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:12px">💰 <b style="color:var(--org)">${fmt(d.ownerPaid)}</b> of these expenses were paid with a personal card/cash — recorded as <b>Owner Contributions</b> (capital in), not company spending.</div>`:''}
     ${d.cats['Major Repairs & Overhauls']?`<div style="background:rgba(96,165,250,.1);border:1px solid var(--acc);border-radius:6px;padding:7px 10px;margin-bottom:8px;font-size:11px">🔧 <b>Major Repairs & Overhauls ${fmt(d.cats['Major Repairs & Overhauls'].total)}</b> — these may be capital improvements your CPA depreciates instead of expensing. Flagged for their review.</div>`:''}
@@ -2862,7 +2874,9 @@ function exportAcctExcel(fullYear){
     });
     html+=`<tr style="font-weight:bold;background:#fee2e2"><td colspan="4">TOTAL DEDUCTIBLE EXPENSES — ${MONTH_LABEL(mo)}</td><td>${d.total.toFixed(2)}</td></tr>
     <tr style="font-weight:bold;background:#dcfce7"><td colspan="4">Gross income</td><td>${d.income.toFixed(2)}</td></tr>
-    <tr><td colspan="4">Per diem days on road</td><td>${d.perDiemDays}</td></tr>
+    <tr style="background:#eff6ff"><td colspan="4">Per diem — days on road this month</td><td>${d.perDiemDays}</td></tr>
+    <tr style="background:#eff6ff"><td colspan="4">Per diem deduction this month (@ $${d.PD_RATE}/day, 80% of $80)</td><td>${d.perDiemAmt.toFixed(2)}</td></tr>
+    <tr style="font-weight:bold;background:#dbeafe"><td colspan="4">Per diem YEAR-TO-DATE ${d.month.slice(0,4)} — ${d.ytdDays} days</td><td>${d.ytdPerDiemAmt.toFixed(2)}</td></tr>
     ${d.ownerPaid>0?`<tr style="font-weight:bold;background:#fef3c7"><td colspan="4">Of which paid personally by owner (Owner Contribution / capital in)</td><td>${d.ownerPaid.toFixed(2)}</td></tr>`:''}`;
     if(d.eqContrib.length||d.eqDraws.length||d.ownerPaid>0){
       html+=`<tr><td colspan="5"></td></tr><tr style="font-weight:bold;background:#dcfce7"><td colspan="5">OWNER'S EQUITY — not income, not expense</td></tr>
@@ -2912,8 +2926,10 @@ function exportAcctPDF(fullYear){
       <div class="sum">
         <div><span>Gross income</span><b class="g">${fmt(d.income)}</b></div>
         <div><span>Deductible expenses</span><b class="r">${fmt(d.total)}</b></div>
-        <div><span>Per diem days</span><b>${d.perDiemDays}</b></div>
+        <div><span>Per diem — this month</span><b>${d.perDiemDays} days · ${fmt(d.perDiemAmt)}</b></div>
+        <div><span>Per diem YTD ${esc(d.month.slice(0,4))}</span><b>${d.ytdDays} days · ${fmt(d.ytdPerDiemAmt)}</b></div>
       </div>
+      <div style="font-size:10px;color:#555;margin:-4px 0 10px">Per diem is meals &amp; incidentals at $${d.PD_RATE}/day (80% of the $80 federal rate) for nights away from the tax home. Claimed separately from the expenses below; meal receipts are deliberately excluded to avoid double-counting.</div>
       <table><thead><tr><th style="width:30%">Category</th><th style="width:14%">Date</th><th>Description</th><th style="width:18%">Paid with</th><th style="width:14%" class="r-al">Amount</th></tr></thead><tbody>`;
     Object.entries(d.cats).sort((a,b)=>b[1].total-a[1].total).forEach(([cat,v])=>{
       v.items.forEach((i,ix)=>{body+=`<tr${i.personal?' class="own"':''}><td>${ix===0?esc(cat):''}</td><td>${esc(i.date)}</td><td>${esc(i.desc)}${i.personal?' <b>[OWNER PAID]</b>':''}</td><td>${i.personal?'💰 '+esc(i.payment||'Personal'):esc(i.payment||i.src)}</td><td class="r-al">${fmt(i.amount)}</td></tr>`;});
