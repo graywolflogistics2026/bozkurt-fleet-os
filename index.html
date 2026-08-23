@@ -144,7 +144,7 @@ canvas{max-height:160px;}
     <div class="ni" onclick="go('settings',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M5.64 5.64a10 10 0 0 1 0 13.13"/></svg>Settings</div>
   </div>
   <div class="suser"><div class="sav">AB</div><div class="sui">Ali Bozkurt<small>Graywolf Logistics</small></div></div>
-  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.08.05-J</div>
+  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.08.05-K</div>
 </div>
 <div id="main">
   <div id="readonly-banner" style="display:none;background:var(--org);color:#000;padding:6px 18px;align-items:center;gap:8px;font-size:12px;font-weight:600">👀 View-Only Mode — you're looking, not editing. Ask the owner for changes.</div>
@@ -1035,13 +1035,15 @@ function restoreKnownEquity(){
     balDelta+=s.kind==='draw'?-s.amount:s.amount;added++;
   });
   if(!added){alert('Both entries are already recorded — nothing to restore.');return;}
+  localStorage.setItem('gw_seed_bal_applied','1'); // legacy flag, kept so old builds can't re-apply
   localStorage.setItem('gw_draws',JSON.stringify(CAPITAL.draws));
   localStorage.setItem('gw_contributions',JSON.stringify(CAPITAL.extraContributions));
   if(balDelta)adjustBizBalance(balDelta,'restore known equity');
   rCapital();rDash&&rDash();try{rAcctMonth();}catch(e){}
   alert('✅ Restored '+added+' entr'+(added>1?'ies':'y')+': $60,000 contribution (5/7/2026) and/or $5,000 draw (8/21/2026).');
 }
-(function seedEquityOnce(){
+(function seedEquityOnce(){ if(true)return; // retired: seeding now happens only via the explicit Restore button (auto-seeding fought with cleanup and double-applied the balance)
+
   const SEEDS=[
     {id:'seed-cap-2026-05-07',kind:'contribution',date:'2026-05-07',amount:60000,desc:'Initial funding — transfer from personal account to business checking',_balApplied:60000},
     {id:'seed-draw-2026-08-21',kind:'draw',date:'2026-08-21',amount:5000,desc:'Owner draw — transfer to personal account',_balApplied:5000}
@@ -1137,6 +1139,7 @@ function updateBizBalance(){
 // a contribution adds, a draw subtracts. (Taxable income is unaffected —
 // draws are not expenses and contributions are not income.)
 function adjustBizBalance(delta,why){
+  if(!isFinite(delta)||delta===0)return parseFloat(localStorage.getItem('gw_bizbal')||'0');
   const cur=parseFloat(localStorage.getItem('gw_bizbal')||'0');
   const next=cur+delta;
   localStorage.setItem('gw_bizbal',next.toString());
@@ -1191,9 +1194,18 @@ function deleteDraw(id){
 // before deletion cascading was added (deleting a deduction now removes its contribution too,
 // but this repairs anything already orphaned prior to that fix).
 function cleanupOrphanedContributions(silent){
+  // Only LINKED contributions (auto-created from a personally-paid deduction) can
+  // be orphaned. Cash transfers the owner entered by hand have no deduction and
+  // must NEVER be swept away — this used to delete the $60,000 initial funding
+  // on every cleanup, which then let the seeder re-add it and re-inflate the
+  // balance in a loop.
   const dedIds=new Set(DB.ded.map(x=>x.id));
   const before=CAPITAL.extraContributions.length;
-  CAPITAL.extraContributions=CAPITAL.extraContributions.filter(c=>dedIds.has(c.id));
+  CAPITAL.extraContributions=CAPITAL.extraContributions.filter(c=>{
+    const isLinked=!!c.sourceDeductionId||dedIds.has(c.id);
+    if(!isLinked)return true;              // manual cash contribution — keep
+    return dedIds.has(c.sourceDeductionId||c.id); // linked — keep only if its deduction lives
+  });
   const removed=before-CAPITAL.extraContributions.length;
   saveContributions();
   rDash();
@@ -4177,6 +4189,18 @@ window.addEventListener('load',()=>{
       }
     });
     if(miscFix>0){saveDB();console.log('Re-classified',miscFix,'rows out of Misc');}
+    // Pass 17 (2026-08-05): the auto-seeder + orphan-cleanup loop could leave
+    // duplicate $60,000 rows behind. Collapse identical cash contributions.
+    (function fixSeedLoop(){
+      const seen=new Set(),keep=[];let dup=0;
+      CAPITAL.extraContributions.forEach(x=>{
+        if(x.sourceDeductionId){keep.push(x);return;}
+        const k=(x.date||'')+'|'+Number(x.amount||0).toFixed(2);
+        if(seen.has(k)){dup++;return;}
+        seen.add(k);keep.push(x);
+      });
+      if(dup){CAPITAL.extraContributions=keep;localStorage.setItem('gw_contributions',JSON.stringify(keep));console.log('Removed',dup,'duplicate cash contribution(s) from the old seed loop');}
+    })();
     // Pass 14 (2026-08-04): the old hard-coded $60,000 base was being ADDED to the
     // explicit contribution rows, inflating the total. Contributions now come from
     // rows only; warn if the seeded row is missing so nothing silently vanishes.
