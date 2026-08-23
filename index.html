@@ -144,7 +144,7 @@ canvas{max-height:160px;}
     <div class="ni" onclick="go('settings',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M5.64 5.64a10 10 0 0 1 0 13.13"/></svg>Settings</div>
   </div>
   <div class="suser"><div class="sav">AB</div><div class="sui">Ali Bozkurt<small>Graywolf Logistics</small></div></div>
-  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.08.04-X</div>
+  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.08.04-Y</div>
 </div>
 <div id="main">
   <div id="readonly-banner" style="display:none;background:var(--org);color:#000;padding:6px 18px;align-items:center;gap:8px;font-size:12px;font-weight:600">👀 View-Only Mode — you're looking, not editing. Ask the owner for changes.</div>
@@ -3522,13 +3522,13 @@ async function saveImport(){
     const prevCredit=_prevSett?(_prevSett.balCredit!==undefined?_prevSett.balCredit:(_prevSett.net||0)):0;
     DB.sett.push({id:uid(),_batch:batch,date:d.date,weekEnding:s.weekEnding,carrier:s.carrier,gross:s.grossRevenue,reimb:s.reimbursements,ded:s.totalDeductions,net:s.netPay,balCredit:Number(s.netPay||0),miles:s.totalMiles,revenueItems:s.revenueItems||[]});
     (s.loads||[]).forEach(l=>{const pickupDate=l.pickupDate||l.date||d.date;const deliveryDate=l.deliveryDate||l.dropDate||null;DB.loads.push({id:uid(),_batch:batch,date:d.date,pickupDate,deliveryDate,...l});});
-    (s.tractorFuel||[]).forEach(f=>DB.fuel.tr.push({id:uid(),_batch:batch,date:f.date||d.date,...f}));
-    (s.reeferFuel||[]).forEach(f=>DB.fuel.re.push({id:uid(),_batch:batch,date:f.date||d.date,...f}));
-    (s.reimbursementItems||[]).forEach(r=>DB.reimb.push({id:uid(),_batch:batch,date:d.date,...r}));
-    (s.deductions||[]).forEach(x=>DB.ded.push({id:uid(),_batch:batch,date:d.date,source:'settlement',payment:'Settlement Withheld',...x}));
+    (s.tractorFuel||[]).forEach(f=>DB.fuel.tr.push({...f,id:uid(),_batch:batch,source:'settlement',date:f.date||d.date}));
+    (s.reeferFuel||[]).forEach(f=>DB.fuel.re.push({...f,id:uid(),_batch:batch,source:'settlement',date:f.date||d.date}));
+    (s.reimbursementItems||[]).forEach(r=>DB.reimb.push({...r,id:uid(),_batch:batch,source:'settlement',date:d.date}));
+    (s.deductions||[]).forEach(x=>DB.ded.push({...x,id:uid(),_batch:batch,date:d.date,source:'settlement',payment:'Settlement Withheld'}));
     (s.maintenance||[]).forEach(m=>{const type=m.serviceType||detectMaintType(m.desc);const rec={id:uid(),_batch:batch,source:'settlement',date:d.date,invoice:m.invoice,unit:m.unit,desc:m.desc,parts:m.parts,labor:m.labor,total:m.total,covered:m.covered,odo:m.odometer||0,type};DB.maint.push(rec);applyMaintToHealth(rec);});
-    (s.tolls?.ezpass?.items||[]).forEach(t=>DB.tolls.ez.push({id:uid(),_batch:batch,source:'settlement',...t}));
-    (s.tolls?.drivewyze?.items||[]).forEach(t=>DB.tolls.dw.push({id:uid(),_batch:batch,source:'settlement',...t}));
+    (s.tolls?.ezpass?.items||[]).forEach(t=>DB.tolls.ez.push({...t,id:uid(),_batch:batch,source:'settlement'}));
+    (s.tolls?.drivewyze?.items||[]).forEach(t=>DB.tolls.dw.push({...t,id:uid(),_batch:batch,source:'settlement'}));
     (s.loans||[]).forEach(l=>{const ex=DB.loans.find(x=>x.name===l.name);if(!ex)DB.loans.push({id:uid(),...l});else{ex.balance=l.balance;ex.nextDue=l.nextDue;}});
     if(s.assets?.tractor)DB.assets.tr=s.assets.tractor;
     if(s.assets?.apu)DB.assets.apu=s.assets.apu;
@@ -3956,7 +3956,13 @@ window.addEventListener('load',()=>{
     let origFix=0;
     const settDates=new Set(DB.sett.map(s=>s.date).filter(Boolean));
     DB.maint.forEach(m=>{if(!m._batch&&!m.source&&settDates.has(m.date)){m.source='settlement';origFix++;}});
-    ['ez','dw'].forEach(k=>(DB.tolls[k]||[]).forEach(t=>{if(!t._batch&&!t.source&&(settDates.has(t.date)||!t.date)){t.source='settlement';origFix++;}}));
+    ['ez','dw'].forEach(k=>(DB.tolls[k]||[]).forEach(t=>{
+      if(t._batch||t.source)return;
+      // EZ-Pass / Drivewyze transponder tolls are billed to the carrier and
+      // withheld — unless the user explicitly recorded a payment method.
+      if(!t.payment||/settlement|withheld/i.test(t.payment)){t.source='settlement';origFix++;}
+    }));
+    DB.maint.forEach(m=>{if(!m._batch&&!m.source&&/prime|carrier shop|repair order|\bRO\b/i.test((m.desc||'')+' '+(m.invoice||''))){m.source='settlement';origFix++;}});
     if(origFix>0){saveDB();console.log('Tagged',origFix,'settlement-origin maintenance/toll rows');}
     // Pass 10 (2026-08-04): fuel additives are their own line, not pump fuel.
     let addFix=0;
