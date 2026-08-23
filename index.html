@@ -144,7 +144,7 @@ canvas{max-height:160px;}
     <div class="ni" onclick="go('settings',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M5.64 5.64a10 10 0 0 1 0 13.13"/></svg>Settings</div>
   </div>
   <div class="suser"><div class="sav">AB</div><div class="sui">Ali Bozkurt<small>Graywolf Logistics</small></div></div>
-  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.08.04-E</div>
+  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.08.04-G</div>
 </div>
 <div id="main">
   <div id="readonly-banner" style="display:none;background:var(--org);color:#000;padding:6px 18px;align-items:center;gap:8px;font-size:12px;font-weight:600">👀 View-Only Mode — you're looking, not editing. Ask the owner for changes.</div>
@@ -2381,16 +2381,45 @@ function acctMonths(){
   return [...set].sort().reverse();
 }
 const MONTH_LABEL=m=>{const[y,mo]=m.split('-');return new Date(+y,+mo-1,1).toLocaleDateString('en-US',{month:'long',year:'numeric'});};
+// ═══ CAPITAL ASSETS (truck / trailer purchases) ═══
+// Vehicle purchases are NOT expenses — they are depreciable assets (Section 179 /
+// bonus depreciation is the accountant's call). Tracked separately and reported
+// in their own section so they never inflate the expense total.
+function getCapAssets(){try{return JSON.parse(localStorage.getItem('gw_capassets')||'[]');}catch(e){return[];}}
+function saveCapAssets(a){localStorage.setItem('gw_capassets',JSON.stringify(a));}
+function addCapAsset(){
+  if(guardReadOnly())return;
+  const kind=prompt('Asset type? Type: truck, trailer, or other','truck');
+  if(kind===null)return;
+  const desc=prompt('Description (year / make / model / unit):','');
+  if(desc===null)return;
+  const date=prompt('Purchase date (YYYY-MM-DD):',new Date().toISOString().slice(0,10));
+  if(date===null)return;
+  const price=parseFloat((prompt('Purchase price ($):','')||'').replace(/[^0-9.]/g,''))||0;
+  if(price<=0){alert('Enter a valid price.');return;}
+  const fin=prompt('Paid how? Type: cash, loan, or lease','loan');
+  if(fin===null)return;
+  const down=fin==='loan'||fin==='lease'?(parseFloat((prompt('Down payment ($, 0 if none):','0')||'').replace(/[^0-9.]/g,''))||0):price;
+  const list=getCapAssets();
+  list.push({id:uid(),kind:(kind||'other').toLowerCase().trim(),desc:desc||'Asset',date,price,financing:(fin||'').toLowerCase().trim(),down,vin:''});
+  saveCapAssets(list);rAcctMonth();rAssets&&rAssets();
+  alert('✅ Added. It appears in the Capital Assets section of the accountant report — not in expenses.');
+}
+function delCapAsset(id){
+  if(guardReadOnly())return;
+  if(!confirm('Remove this asset from the report?'))return;
+  saveCapAssets(getCapAssets().filter(a=>a.id!==id));rAcctMonth();
+}
 function acctScope(){const el=$('ap-scope');return el?el.value:'oop';}
 function acctMonthData(mo,scopeArg){
   const scope=scopeArg||acctScope();
   const wantOOP=scope==='oop'||scope==='all', wantSett=scope==='sett'||scope==='all';
   const inMo=d=>d&&d.slice(0,7)===mo;
   const cats={};
-  const add=(cat,amt,desc,date,src,id,payment)=>{
+  const add=(cat,amt,desc,date,src,id,payment,store)=>{
     if(!cats[cat])cats[cat]={total:0,items:[]};
     const personal=isPersonalPayment(payment);
-    cats[cat].total+=amt;cats[cat].items.push({desc,amount:amt,date,src,id,payment:payment||'',personal});
+    cats[cat].total+=amt;cats[cat].items.push({desc,amount:amt,date,src,id,payment:payment||'',personal,store:store||'ded'});
   };
   // Deductions (skip non-deductible: meals/per-diem, advance repayments, escrow)
   DB.ded.forEach(x=>{
@@ -2398,41 +2427,74 @@ function acctMonthData(mo,scopeArg){
     const isSett=x.source==='settlement';
     if(isSett&&!wantSett)return;
     if(!isSett&&!wantOOP)return;
-    add(x.category||'Misc',x.amount||0,x.desc||x.code||'—',x.date,isSett?'Settlement':'Out-of-pocket',x.id,x.payment);
+    add(x.category||'Misc',x.amount||0,x.desc||x.code||'—',x.date,isSett?'Settlement':'Out-of-pocket',x.id,x.payment,'ded');
   });
   // Fuel
   // Fuel/maintenance/tolls that came from a settlement are carrier-withheld;
   // ones you paid yourself are out-of-pocket. _batch marks settlement origin.
   const originOK=x=>{const isSett=!!x._batch||x.source==='settlement';return isSett?wantSett:wantOOP;};
-  DB.fuel.tr.forEach(f=>{if(inMo(f.date)&&originOK(f))add('Fuel & DEF',(f.amount||0)-(f.discount||0),'Tractor fuel — '+(f.location||''),f.date,(f._batch?'Settlement':'Out-of-pocket'));});
-  DB.fuel.re.forEach(f=>{if(inMo(f.date)&&originOK(f))add('Fuel & DEF',(f.amount||0)-(f.discount||0),'Reefer fuel — '+(f.location||''),f.date,(f._batch?'Settlement':'Out-of-pocket'));});
-  DB.maint.forEach(m=>{if(inMo(m.date)&&originOK(m))add('Maintenance & Repairs',(m.total||0)-(m.covered||0),m.desc||m.invoice||'Service',m.date,(m._batch?'Settlement':'Out-of-pocket'));});
-  (DB.tolls.ez||[]).forEach(t=>{if(inMo(t.date)&&originOK(t))add('Tolls & Scales',t.amount||0,'EZ-Pass — '+(t.location||''),t.date,(t._batch?'Settlement':'Out-of-pocket'));});
-  (DB.tolls.dw||[]).forEach(t=>{if(inMo(t.date)&&originOK(t))add('Tolls & Scales',t.amount||0,'Drivewyze — '+(t.location||''),t.date,(t._batch?'Settlement':'Out-of-pocket'));});
+  const settOrigin=x=>!!x._batch||x.source==='settlement';
+  DB.fuel.tr.forEach(f=>{if(inMo(f.date)&&originOK(f))add('Fuel & DEF',(f.amount||0)-(f.discount||0),'Tractor fuel — '+(f.location||''),f.date,(settOrigin(f)?'Settlement':'Out-of-pocket'),f.id,'','fuel.tr');});
+  DB.fuel.re.forEach(f=>{if(inMo(f.date)&&originOK(f))add('Fuel & DEF',(f.amount||0)-(f.discount||0),'Reefer fuel — '+(f.location||''),f.date,(settOrigin(f)?'Settlement':'Out-of-pocket'),f.id,'','fuel.re');});
+  DB.maint.forEach(m=>{if(inMo(m.date)&&originOK(m))add('Maintenance & Repairs',(m.total||0)-(m.covered||0),m.desc||m.invoice||'Service',m.date,(settOrigin(m)?'Settlement':'Out-of-pocket'),m.id,'','maint');});
+  (DB.tolls.ez||[]).forEach(t=>{if(inMo(t.date)&&originOK(t))add('Tolls & Scales',t.amount||0,'EZ-Pass — '+(t.location||''),t.date,(settOrigin(t)?'Settlement':'Out-of-pocket'),t.id,'','tolls.ez');});
+  (DB.tolls.dw||[]).forEach(t=>{if(inMo(t.date)&&originOK(t))add('Tolls & Scales',t.amount||0,'Drivewyze — '+(t.location||''),t.date,(settOrigin(t)?'Settlement':'Out-of-pocket'),t.id,'','tolls.dw');});
   // Lumper fees — accountant wants these called out separately (they appear as
   // reimbursements/income AND as the advance that paid them)
   const lumperRe=/lumper/i;
   const lumpers=[];
-  DB.reimb.forEach(r=>{if(inMo(r.date)&&lumperRe.test(r.desc||''))lumpers.push({desc:r.desc,amount:r.amount||0,date:r.date,kind:'Reimbursed to you'});});
-  DB.ded.forEach(x=>{if(inMo(x.date)&&lumperRe.test(x.desc||''))lumpers.push({desc:x.desc,amount:x.amount||0,date:x.date,kind:'Paid out (advance)'});});
+  DB.reimb.forEach(r=>{if(inMo(r.date)&&lumperRe.test(r.desc||''))lumpers.push({desc:r.desc,amount:r.amount||0,date:r.date,kind:'Reimbursed to you',id:r.id,store:'reimb'});});
+  DB.ded.forEach(x=>{if(inMo(x.date)&&lumperRe.test(x.desc||''))lumpers.push({desc:x.desc,amount:x.amount||0,date:x.date,kind:'Paid out (advance)',id:x.id,store:'ded'});});
   // Income for the month
   let income=0,perDiemDays=0;
   DB.sett.forEach(s=>{const d=s.weekEnding||s.date;if(inMo(d)){income+=s.gross||0;perDiemDays+=(s.perDiemDays===0||s.perDiemDays)?s.perDiemDays:7;}});
   const total=Object.values(cats).reduce((a,x)=>a+x.total,0);
+  const capAssets=getCapAssets().filter(a=>inMo(a.date));
+  const capTotal=capAssets.reduce((a,x)=>a+(x.price||0),0);
   let ownerPaid=0;
   Object.values(cats).forEach(v=>v.items.forEach(i=>{if(i.personal)ownerPaid+=i.amount;}));
   const scopeLabel=scope==='oop'?'Out-of-pocket expenses only':scope==='sett'?'Settlement-withheld only':'All expenses combined';
-  return {month:mo,cats,total,lumpers,income,perDiemDays,scope,scopeLabel,ownerPaid};
+  return {month:mo,cats,total,lumpers,income,perDiemDays,scope,scopeLabel,ownerPaid,capAssets,capTotal};
 }
 // Fix a miscategorized row straight from the accountant report — no need to
 // hunt for it on the Deductions page before sending the file out.
-function acctRecat(id,cat){
-  const row=DB.ded.find(x=>x.id===id);
-  if(!row){alert('Row not found');return;}
-  row.category=cat;
-  if(cat==='Meals (per diem covered)'||cat==='Advance Repayment'||cat==='Escrow & Deposits')row.taxDeductible=false;
-  else if(row.taxDeductible===false)row.taxDeductible=true;
-  saveDB();rAcctMonth();rDed&&rDed();
+// One helper for every list the report pulls from, so edit/delete work on all rows.
+function _acctStore(store){
+  if(store==='fuel.tr')return DB.fuel.tr;
+  if(store==='fuel.re')return DB.fuel.re;
+  if(store==='maint')return DB.maint;
+  if(store==='tolls.ez')return DB.tolls.ez;
+  if(store==='tolls.dw')return DB.tolls.dw;
+  if(store==='reimb')return DB.reimb;
+  return DB.ded;
+}
+function acctRecat(store,id,cat){
+  if(guardReadOnly())return;
+  const arr=_acctStore(store);
+  const row=arr.find(x=>x.id===id);
+  if(!row){alert('Row not found — reload and try again.');return;}
+  if(store!=='ded'){
+    // Non-deduction rows (fuel/maintenance/tolls) don't carry a category field;
+    // moving them means converting to a deduction row so the category sticks.
+    if(!confirm('Move this '+store.split('.')[0]+' entry into Deductions as "'+cat+'"?\n\nIt will leave the '+store.split('.')[0]+' list.'))return;
+    const amount=store==='maint'?((row.total||0)-(row.covered||0)):store.startsWith('fuel')?((row.amount||0)-(row.discount||0)):(row.amount||0);
+    DB.ded.push({id:uid(),date:row.date,desc:row.desc||row.invoice||row.location||'Moved entry',category:cat,amount,source:row.source||( row._batch?'settlement':'manual'),_batch:row._batch,payment:row.payment||'',taxDeductible:!(cat==='Meals (per diem covered)'||cat==='Advance Repayment'||cat==='Escrow & Deposits'),bizPct:100});
+    const ix=arr.indexOf(row);arr.splice(ix,1);
+  }else{
+    row.category=cat;
+    if(cat==='Meals (per diem covered)'||cat==='Advance Repayment'||cat==='Escrow & Deposits')row.taxDeductible=false;
+    else if(row.taxDeductible===false)row.taxDeductible=true;
+  }
+  saveDB();rAcctMonth();rDed&&rDed();rAll&&rAll();
+}
+function acctDelRow(store,id){
+  if(guardReadOnly())return;
+  const arr=_acctStore(store);
+  const row=arr.find(x=>x.id===id);
+  if(!row){alert('Row not found — reload and try again.');return;}
+  if(!confirm('Delete this entry permanently?\n\n'+(row.desc||row.location||row.invoice||'')+'\n\nIt will disappear from every report and total.'))return;
+  arr.splice(arr.indexOf(row),1);
+  saveDB();rAcctMonth();rDed&&rDed();rAll&&rAll();
 }
 function rAcctMonth(){
   const sel=$('ap-month');if(!sel)return;
@@ -2445,11 +2507,17 @@ function rAcctMonth(){
   const d=acctMonthData(mo);
   const rows=Object.entries(d.cats).sort((a,b)=>b[1].total-a[1].total).map(([cat,v])=>`
     <tr><td style="font-weight:600">${cat}</td><td class="tm">${v.items.length}</td><td class="tm" style="color:var(--red)">${fmt(v.total)}</td></tr>
-    ${v.items.map(i=>`<tr style="font-size:11px;color:${i.personal?'var(--org)':'var(--mut)'}${i.personal?';background:rgba(245,158,11,.07)':''}"><td style="padding-left:18px">${fd(i.date)} · ${i.desc}${i.personal?' <span style="background:var(--org);color:#1a1f2e;border-radius:8px;padding:1px 6px;font-size:9px;font-weight:700">💰 OWNER PAID</span>':''}</td><td class="tm">${i.id?`<select onchange="acctRecat('${i.id}',this.value)" style="background:var(--c2);border:1px solid var(--bd);color:var(--tx);border-radius:4px;font-size:10px;padding:2px;max-width:150px" title="Fix the category before sending to your accountant">${DED_CATEGORIES.map(cc=>`<option${cc===cat?' selected':''}>${cc}</option>`).join('')}</select>`:i.src}</td><td class="tm">${fmt(i.amount)}</td></tr>`).join('')}`).join('');
+    ${v.items.map(i=>`<tr style="font-size:11px;color:${i.personal?'var(--org)':'var(--mut)'}${i.personal?';background:rgba(245,158,11,.07)':''}"><td style="padding-left:18px">${fd(i.date)} · ${i.desc}${i.personal?' <span style="background:var(--org);color:#1a1f2e;border-radius:8px;padding:1px 6px;font-size:9px;font-weight:700">💰 OWNER PAID</span>':''}</td><td class="tm"><select onchange="acctRecat('${i.store}','${i.id||''}',this.value)" style="background:var(--c2);border:1px solid var(--bd);color:var(--tx);border-radius:4px;font-size:10px;padding:2px;max-width:140px" title="Change category">${DED_CATEGORIES.map(cc=>`<option${cc===cat?' selected':''}>${cc}</option>`).join('')}</select> <span class="tm" style="font-size:9px">${i.src==='Settlement'?'🏦':'💳'}</span></td><td class="tm">${fmt(i.amount)} <button onclick="acctDelRow('${i.store}','${i.id||''}')" style="background:none;border:1px solid var(--red);color:var(--red);padding:1px 5px;border-radius:4px;font-size:9px;cursor:pointer;margin-left:4px" title="Delete this row">✕</button></td></tr>`).join('')}`).join('');
   const lump=d.lumpers.length?`<div class="ct" style="margin-top:14px">📦 Lumper Fees</div>
     <table class="tb"><thead><tr><th>Date</th><th>Description</th><th>Type</th><th>Amount</th></tr></thead><tbody>
-    ${d.lumpers.map(l=>`<tr><td>${fd(l.date)}</td><td>${l.desc}</td><td>${l.kind}</td><td class="tm">${fmt(l.amount)}</td></tr>`).join('')}
+    ${d.lumpers.map(l=>`<tr><td>${fd(l.date)}</td><td>${l.desc}</td><td>${l.kind}</td><td class="tm">${fmt(l.amount)}${l.id?` <button onclick="acctDelRow('${l.store}','${l.id}')" style="background:none;border:1px solid var(--red);color:var(--red);padding:1px 5px;border-radius:4px;font-size:9px;cursor:pointer;margin-left:4px" title="Delete">✕</button>`:''}</td></tr>`).join('')}
     </tbody></table>`:'';
+  const KIND_ICON={truck:'🚛',trailer:'🚚',other:'🔧'};
+  const capBlock=`<div class="ct" style="margin-top:14px">🏷️ Capital Assets — depreciable, NOT expenses <button class="btn" style="float:right;font-size:10px;padding:3px 9px" onclick="addCapAsset()">+ Add purchase</button></div>
+    ${d.capAssets.length?`<table class="tb"><thead><tr><th>Type</th><th>Description</th><th>Date</th><th>Financing</th><th>Price</th><th></th></tr></thead><tbody>
+    ${d.capAssets.map(a=>`<tr style="background:rgba(96,165,250,.07)"><td>${KIND_ICON[a.kind]||'🔧'} ${a.kind}</td><td>${a.desc}</td><td>${fd(a.date)}</td><td class="tm" style="font-size:11px">${a.financing||'—'}${a.down?' · down '+fmt(a.down):''}</td><td class="tm" style="color:var(--acc)">${fmt(a.price)}</td><td><button onclick="delCapAsset('${a.id}')" style="background:none;border:1px solid var(--red);color:var(--red);padding:1px 6px;border-radius:4px;font-size:10px;cursor:pointer">✕</button></td></tr>`).join('')}
+    </tbody><tfoot><tr style="font-weight:700"><td colspan="4">TOTAL CAPITAL ASSETS (for depreciation — ask your CPA about Section 179 / bonus)</td><td class="tm" style="color:var(--acc)">${fmt(d.capTotal)}</td><td></td></tr></tfoot></table>`
+    :'<div class="empty" style="font-size:11px">No truck/trailer purchases this month — use "+ Add purchase" when you buy one.</div>'}`;
   $('ap-monthly').innerHTML=`
     <div style="font-size:11px;color:var(--mut);margin-bottom:8px">Scope: <b style="color:var(--acc)">${d.scopeLabel}</b></div>
     <div class="g3" style="margin-bottom:12px">
@@ -2458,11 +2526,12 @@ function rAcctMonth(){
       <div class="sc"><div class="sl">Per Diem Days</div><div class="sv">${d.perDiemDays}</div></div>
     </div>
     ${d.ownerPaid>0?`<div style="background:rgba(245,158,11,.1);border:1px solid var(--org);border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:12px">💰 <b style="color:var(--org)">${fmt(d.ownerPaid)}</b> of these expenses were paid with a personal card/cash — recorded as <b>Owner Contributions</b> (capital in), not company spending.</div>`:''}
-    <div style="font-size:11px;color:var(--org);margin-bottom:6px">✏️ Review before sending: change any wrong category with the dropdown next to the item — the report, Excel and PDF update instantly.</div>
+    <div style="font-size:11px;color:var(--org);margin-bottom:6px">✏️ Review before sending: fix a wrong category with the dropdown, or delete a row with ✕ — report, Excel and PDF update instantly. 🏦 = withheld by carrier · 💳 = you paid it.</div>
     <table class="tb"><thead><tr><th>Category / Item</th><th>Count / Category fix</th><th>Amount</th></tr></thead>
     <tbody>${rows||'<tr><td colspan="3" class="empty">No expenses this month</td></tr>'}</tbody>
     <tfoot><tr style="font-weight:700;border-top:2px solid var(--bd)"><td>TOTAL</td><td></td><td class="tm" style="color:var(--red)">${fmt(d.total)}</td></tr></tfoot></table>
-    ${lump}`;
+    ${lump}
+    ${capBlock}`;
 }
 // Excel export (real .xls via HTML table — opens natively in Excel/Sheets)
 function exportAcctExcel(fullYear){
@@ -2484,6 +2553,12 @@ function exportAcctExcel(fullYear){
     <tr style="font-weight:bold;background:#dcfce7"><td colspan="4">Gross income</td><td>${d.income.toFixed(2)}</td></tr>
     <tr><td colspan="4">Per diem days on road</td><td>${d.perDiemDays}</td></tr>
     ${d.ownerPaid>0?`<tr style="font-weight:bold;background:#fef3c7"><td colspan="4">Of which paid personally by owner (Owner Contribution / capital in)</td><td>${d.ownerPaid.toFixed(2)}</td></tr>`:''}`;
+    if(d.capAssets.length){
+      html+=`<tr><td colspan="5"></td></tr><tr style="font-weight:bold;background:#dbeafe"><td colspan="5">CAPITAL ASSETS — depreciable, NOT expenses</td></tr>
+      <tr style="font-weight:bold"><td>Type</td><td>Date</td><td>Description</td><td>Financing</td><td>Purchase price</td></tr>`;
+      d.capAssets.forEach(a=>{html+=`<tr style="background:#eff6ff"><td>${a.kind}</td><td>${a.date||''}</td><td>${(a.desc||'').replace(/</g,'')}</td><td>${a.financing||''}${a.down?' (down '+a.down.toFixed(2)+')':''}</td><td>${(a.price||0).toFixed(2)}</td></tr>`;});
+      html+=`<tr style="font-weight:bold;background:#dbeafe"><td colspan="4">TOTAL CAPITAL ASSETS (Section 179 / bonus depreciation — CPA decision)</td><td>${d.capTotal.toFixed(2)}</td></tr>`;
+    }
     if(d.lumpers.length){
       html+=`<tr><td colspan="5"></td></tr><tr style="font-weight:bold;background:#fef3c7"><td colspan="5">LUMPER FEES</td></tr>
       <tr style="font-weight:bold"><td>Date</td><td colspan="2">Description</td><td>Type</td><td>Amount</td></tr>`;
@@ -2526,6 +2601,12 @@ function exportAcctPDF(fullYear){
       body+=`<tr class="sub"><td></td><td></td><td>${esc(cat)} subtotal</td><td>${v.items.length} items</td><td class="r-al">${fmt(v.total)}</td></tr>`;
     });
     body+=`</tbody><tfoot><tr class="tot"><td colspan="4">TOTAL DEDUCTIBLE EXPENSES</td><td class="r-al">${fmt(d.total)}</td></tr>${d.ownerPaid>0?`<tr class="own tot2"><td colspan="4">— of which paid personally by owner (Owner Contribution / capital in)</td><td class="r-al">${fmt(d.ownerPaid)}</td></tr>`:''}</tfoot></table>`;
+    if(d.capAssets.length){
+      body+=`<h3 style="color:#1e3a8a">Capital Assets — depreciable, NOT expenses</h3>
+      <table><thead><tr><th>Type</th><th>Date</th><th>Description</th><th>Financing</th><th class="r-al">Purchase price</th></tr></thead><tbody>`;
+      d.capAssets.forEach(a=>{body+=`<tr class="cap"><td>${esc(a.kind)}</td><td>${esc(a.date)}</td><td>${esc(a.desc)}</td><td>${esc(a.financing)}${a.down?' (down '+fmt(a.down)+')':''}</td><td class="r-al">${fmt(a.price)}</td></tr>`;});
+      body+=`</tbody><tfoot><tr class="captot"><td colspan="4">TOTAL CAPITAL ASSETS (Section 179 / bonus depreciation — CPA decision)</td><td class="r-al">${fmt(d.capTotal)}</td></tr></tfoot></table>`;
+    }
     if(d.lumpers.length){
       body+=`<h3>Lumper Fees</h3><table><thead><tr><th>Date</th><th>Description</th><th>Type</th><th class="r-al">Amount</th></tr></thead><tbody>`;
       d.lumpers.forEach(l=>{body+=`<tr><td>${esc(l.date)}</td><td>${esc(l.desc)}</td><td>${esc(l.kind)}</td><td class="r-al">${fmt(l.amount)}</td></tr>`;});
@@ -2561,6 +2642,8 @@ function exportAcctPDF(fullYear){
     .tot td{background:#fee2e2;font-weight:700;font-size:12px}
     .g{color:#15803d}.r{color:#b91c1c}
     .own td{background:#fef3c7}
+    .cap td{background:#eff6ff}
+    .captot td{background:#dbeafe;font-weight:700;color:#1e3a8a}
     .tot2 td{font-weight:700;color:#92400e}
     .pb{page-break-before:always}
     tr{page-break-inside:avoid}
@@ -2570,7 +2653,7 @@ function exportAcctPDF(fullYear){
   <h1>${esc(biz.company)}</h1>
   <div class="meta">Expense report for accountant${biz.ein?' · EIN '+esc(biz.ein):''} · generated ${new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})}</div>
   ${body}
-  <footer>Meals are excluded (covered by the per diem deduction). Advance repayments (loan principal) and escrow/performance-bond deposits are excluded as non-deductible. Rows marked <b>OWNER PAID</b> (amber) were paid with a personal card or cash and are recorded as Owner Contributions — capital contributed to the business, not company funds. Figures are from imported settlements and receipts — verify against source documents.</footer>
+  <footer>Meals are excluded (covered by the per diem deduction). Advance repayments (loan principal) and escrow/performance-bond deposits are excluded as non-deductible. Capital Assets (blue) are vehicle/equipment purchases — depreciable assets, deliberately excluded from the expense totals. Rows marked <b>OWNER PAID</b> (amber) were paid with a personal card or cash and are recorded as Owner Contributions — capital contributed to the business, not company funds. Figures are from imported settlements and receipts — verify against source documents.</footer>
   </body></html>`);
   w.document.close();
   setTimeout(()=>{w.focus();w.print();},400);
@@ -3150,9 +3233,9 @@ async function saveImport(){
     (s.reeferFuel||[]).forEach(f=>DB.fuel.re.push({id:uid(),_batch:batch,date:f.date||d.date,...f}));
     (s.reimbursementItems||[]).forEach(r=>DB.reimb.push({id:uid(),_batch:batch,date:d.date,...r}));
     (s.deductions||[]).forEach(x=>DB.ded.push({id:uid(),_batch:batch,date:d.date,source:'settlement',payment:'Settlement Withheld',...x}));
-    (s.maintenance||[]).forEach(m=>{const type=m.serviceType||detectMaintType(m.desc);const rec={id:uid(),date:d.date,invoice:m.invoice,unit:m.unit,desc:m.desc,parts:m.parts,labor:m.labor,total:m.total,covered:m.covered,odo:m.odometer||0,type};DB.maint.push(rec);applyMaintToHealth(rec);});
-    (s.tolls?.ezpass?.items||[]).forEach(t=>DB.tolls.ez.push({id:uid(),...t}));
-    (s.tolls?.drivewyze?.items||[]).forEach(t=>DB.tolls.dw.push({id:uid(),...t}));
+    (s.maintenance||[]).forEach(m=>{const type=m.serviceType||detectMaintType(m.desc);const rec={id:uid(),_batch:batch,source:'settlement',date:d.date,invoice:m.invoice,unit:m.unit,desc:m.desc,parts:m.parts,labor:m.labor,total:m.total,covered:m.covered,odo:m.odometer||0,type};DB.maint.push(rec);applyMaintToHealth(rec);});
+    (s.tolls?.ezpass?.items||[]).forEach(t=>DB.tolls.ez.push({id:uid(),_batch:batch,source:'settlement',...t}));
+    (s.tolls?.drivewyze?.items||[]).forEach(t=>DB.tolls.dw.push({id:uid(),_batch:batch,source:'settlement',...t}));
     (s.loans||[]).forEach(l=>{const ex=DB.loans.find(x=>x.name===l.name);if(!ex)DB.loans.push({id:uid(),...l});else{ex.balance=l.balance;ex.nextDue=l.nextDue;}});
     if(s.assets?.tractor)DB.assets.tr=s.assets.tractor;
     if(s.assets?.apu)DB.assets.apu=s.assets.apu;
@@ -3575,6 +3658,13 @@ window.addEventListener('load',()=>{
       }
     });
     if(washFix>0){saveDB();console.log('Re-filed',washFix,'wash lines');}
+    // Pass 9 (2026-08-04): maintenance/tolls imported from settlements predate the
+    // origin tag — mark them so the accountant's out-of-pocket view excludes them.
+    let origFix=0;
+    const settDates=new Set(DB.sett.map(s=>s.date).filter(Boolean));
+    DB.maint.forEach(m=>{if(!m._batch&&!m.source&&settDates.has(m.date)){m.source='settlement';origFix++;}});
+    ['ez','dw'].forEach(k=>(DB.tolls[k]||[]).forEach(t=>{if(!t._batch&&!t.source&&(settDates.has(t.date)||!t.date)){t.source='settlement';origFix++;}}));
+    if(origFix>0){saveDB();console.log('Tagged',origFix,'settlement-origin maintenance/toll rows');}
   }catch(e){console.error('tax-merge:',e);}
   // One-time migration: older imports didn't tag settlement-withheld deductions. Any deduction
   // whose date matches a settlement AND has no payment/source info is treated as withheld.
