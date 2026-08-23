@@ -144,7 +144,7 @@ canvas{max-height:160px;}
     <div class="ni" onclick="go('settings',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M5.64 5.64a10 10 0 0 1 0 13.13"/></svg>Settings</div>
   </div>
   <div class="suser"><div class="sav">AB</div><div class="sui">Ali Bozkurt<small>Graywolf Logistics</small></div></div>
-  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.08.04-T</div>
+  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.08.04-U</div>
 </div>
 <div id="main">
   <div id="readonly-banner" style="display:none;background:var(--org);color:#000;padding:6px 18px;align-items:center;gap:8px;font-size:12px;font-weight:600">👀 View-Only Mode — you're looking, not editing. Ask the owner for changes.</div>
@@ -1689,15 +1689,41 @@ function rWeeklyTrend(){
 // Ranks all loads from settlement history by rate-per-loaded-mile: top 5 best, bottom 5 worst.
 function rLoadProfit(){
   const el=$('load-profit');if(!el)return;
-  const loads=DB.loads.filter(l=>(l.loadedMiles||0)>0&&(l.revenue||0)>0)
-    .map(l=>({...l,rpm:(l.revenue||0)/(l.loadedMiles||1)}));
-  if(!loads.length){el.innerHTML='<div class="empty">Import settlement PDFs with load data</div>';return;}
+  // Data hygiene first — bad extractions used to produce nonsense like a 60-mile
+  // load at $79/mi (the settlement total landed on one load line).
+  // 1) de-duplicate by order number, keeping the most complete row
+  const byOrder=new Map();
+  DB.loads.forEach(l=>{
+    const mi=Number(l.loadedMiles||0), rev=Number(l.revenue||0);
+    if(!(mi>0)||!(rev>0))return;
+    const key=String(l.order||'')+'|'+(l.from||'')+'|'+(l.to||'');
+    const prev=byOrder.get(key);
+    if(!prev||mi>Number(prev.loadedMiles||0))byOrder.set(key,l);
+  });
+  const raw=[...byOrder.values()].map(l=>({...l,loadedMiles:Number(l.loadedMiles),revenue:Number(l.revenue),rpm:Number(l.revenue)/Number(l.loadedMiles)}));
+  // 2) quarantine implausible rates instead of ranking them: real dry-van/reefer
+  //    linehaul sits roughly between $0.80 and $12/mi. Anything outside that is a
+  //    mis-extraction, not a great lane.
+  const LO=0.80, HI=12;
+  const clean=raw.filter(l=>l.rpm>=LO&&l.rpm<=HI);
+  const suspect=raw.filter(l=>l.rpm<LO||l.rpm>HI);
+  const loads=clean;
+  if(!loads.length){
+    el.innerHTML='<div class="empty">Import settlement PDFs with load data</div>'+
+      (suspect.length?`<div style="font-size:11px;color:var(--org);margin-top:8px">⚠️ ${suspect.length} load(s) had an implausible rate and were excluded — check them on the Loads page.</div>`:'');
+    return;
+  }
   const sorted=[...loads].sort((a,b)=>b.rpm-a.rpm);
-  const avg=loads.reduce((a,x)=>a+x.rpm,0)/loads.length;
-  const best=sorted.slice(0,5),worst=sorted.slice(-5).reverse();
+  // 3) true average = total revenue / total loaded miles (not the mean of rates,
+  //    which over-weights short hauls)
+  const totRev=loads.reduce((a,x)=>a+x.revenue,0), totMi=loads.reduce((a,x)=>a+x.loadedMiles,0);
+  const avg=totMi>0?totRev/totMi:0;
+  const n=Math.min(5,Math.floor(loads.length/2))||Math.min(loads.length,1);
+  const best=sorted.slice(0,n),worst=loads.length>1?sorted.slice(-n).reverse():[];
   const row=(l,good)=>`<tr><td class="tm" style="font-size:11px">${l.from||'?'} → ${l.to||'?'}</td><td class="ta" style="font-size:11px">${l.order||'—'}</td><td style="font-size:11px">${(l.loadedMiles||0).toLocaleString()} mi</td><td class="tr">${fmt(l.revenue||0)}</td><td style="font-weight:700;color:${good?'var(--grn)':'var(--red)'}">$${l.rpm.toFixed(2)}/mi</td></tr>`;
   el.innerHTML=
-    `<div style="font-size:12px;margin-bottom:8px">Average across ${loads.length} loads: <b style="color:var(--acc)">$${avg.toFixed(2)}/loaded mi</b></div>`+
+    `<div style="font-size:12px;margin-bottom:8px">Average across ${loads.length} loads: <b style="color:var(--acc)">$${avg.toFixed(2)}/loaded mi</b> <span style="font-size:10px;color:var(--mut)">(total revenue ${fmt(totRev)} ÷ ${totMi.toLocaleString()} loaded mi)</span></div>`+
+    (suspect.length?`<div style="font-size:11px;color:var(--org);margin-bottom:8px;background:rgba(245,158,11,.08);border:1px solid var(--org);border-radius:6px;padding:6px 9px">⚠️ ${suspect.length} load(s) excluded — rate outside $${LO.toFixed(2)}–$${HI}/mi looks like a mis-read settlement line: ${suspect.slice(0,3).map(s=>(s.order||'?')+' ('+s.loadedMiles+' mi, '+fmt(s.revenue)+' = $'+s.rpm.toFixed(2)+'/mi)').join(', ')}${suspect.length>3?'…':''}. Fix them on the Loads page.</div>`:'')+
     '<div class="ct" style="font-size:12px;margin-bottom:4px;color:var(--grn)">🏆 Best Lanes</div>'+
     '<table><thead><tr><th>Lane</th><th>Order</th><th>Loaded Mi</th><th>Revenue</th><th>Rate</th></tr></thead><tbody>'+best.map(l=>row(l,true)).join('')+'</tbody></table>'+
     '<div class="ct" style="font-size:12px;margin:12px 0 4px;color:var(--red)">⚠️ Worst Lanes</div>'+
