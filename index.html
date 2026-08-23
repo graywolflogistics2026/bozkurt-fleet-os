@@ -144,7 +144,7 @@ canvas{max-height:160px;}
     <div class="ni" onclick="go('settings',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M5.64 5.64a10 10 0 0 1 0 13.13"/></svg>Settings</div>
   </div>
   <div class="suser"><div class="sav">AB</div><div class="sui">Ali Bozkurt<small>Graywolf Logistics</small></div></div>
-  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.08.05-I</div>
+  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.08.05-J</div>
 </div>
 <div id="main">
   <div id="readonly-banner" style="display:none;background:var(--org);color:#000;padding:6px 18px;align-items:center;gap:8px;font-size:12px;font-weight:600">👀 View-Only Mode — you're looking, not editing. Ask the owner for changes.</div>
@@ -2726,6 +2726,15 @@ function classifySettlementLine(desc){
   for(const [re,cat] of SETTLEMENT_CLASSIFIER){if(re.test(d))return cat;}
   return null;
 }
+// "Unit 283940 · 2023 International LT" — pulled from the truck record so every
+// report and export identifies which truck it belongs to.
+function truckLabel(){
+  const t=(DB.assets&&DB.assets.tr)||{};
+  const unit=t.unit?'Unit '+t.unit:'';
+  const desc=[t.year,t.make,t.model].filter(Boolean).join(' ');
+  const parts=[unit,desc].filter(Boolean);
+  return parts.length?' — '+parts.join(' · '):'';
+}
 function acctScope(){const el=$('ap-scope');return el?el.value:'oop';}
 function acctMonthData(mo,scopeArg){
   const scope=scopeArg||acctScope();
@@ -2888,7 +2897,7 @@ function rAcctMonth(){
   Object.values(d.cats).forEach(v=>v.items.forEach(i=>{const y=+String(i.date||'').slice(0,4);if(y&&(y<2020||y>new Date().getFullYear()+1))badDates.push(i);}));
   d.lumpers.forEach(l=>{const y=+String(l.date||'').slice(0,4);if(y&&(y<2020||y>new Date().getFullYear()+1))badDates.push(l);});
   const rows=Object.entries(d.cats).sort((a,b)=>b[1].total-a[1].total).map(([cat,v])=>`
-    <tr><td style="font-weight:600">${cat}${schedC(cat)}</td><td class="tm">${v.items.length}</td><td class="tm" style="color:var(--red)">${fmt(v.total)}</td></tr>
+    <tr style="border-top:1px solid var(--bd)"><td style="font-weight:800;font-size:12.5px;color:var(--tx);letter-spacing:.2px">${cat}${schedC(cat)}</td><td class="tm">${v.items.length}</td><td class="tm" style="color:var(--red)">${fmt(v.total)}</td></tr>
     ${v.items.map(i=>`<tr style="font-size:11px;color:${i.personal?'var(--org)':'var(--mut)'}${i.personal?';background:rgba(245,158,11,.07)':''}"><td style="padding-left:18px">${fd(i.date)} · ${i.desc}${i.personal?' <span style="background:var(--org);color:#1a1f2e;border-radius:8px;padding:1px 6px;font-size:9px;font-weight:700">💰 OWNER PAID</span>':''}</td><td class="tm"><select onchange="acctRecat('${i.store}','${i.id||''}',this.value)" style="background:var(--c2);border:1px solid var(--bd);color:var(--tx);border-radius:4px;font-size:10px;padding:2px;max-width:140px" title="Change category">${DED_CATEGORIES.map(cc=>`<option${cc===cat?' selected':''}>${cc}</option>`).join('')}</select> <span class="tm" style="font-size:9px">${i.src==='Settlement'?'🏦':'💳'}</span></td><td class="tm">${fmt(i.amount)} <button onclick="acctDelRow('${i.store}','${i.id||''}')" style="background:none;border:1px solid var(--red);color:var(--red);padding:1px 5px;border-radius:4px;font-size:9px;cursor:pointer;margin-left:4px" title="Delete this row">✕</button></td></tr>`).join('')}`).join('');
   const lump=d.lumpers.length?`<div class="ct" style="margin-top:4px">📦 Lumper Fees</div>
     <table class="tb"><thead><tr><th>Date</th><th>Description</th><th>Type</th><th>Amount</th></tr></thead><tbody>
@@ -2912,7 +2921,7 @@ function rAcctMonth(){
     </tbody><tfoot><tr style="font-weight:700"><td colspan="4">TOTAL CAPITAL ASSETS (for depreciation — ask your CPA about Section 179 / bonus)</td><td class="tm" style="color:var(--acc)">${fmt(d.capTotal)}</td><td></td></tr></tfoot></table>`
     :'<div class="empty" style="font-size:11px">No truck/trailer purchases this month — use "+ Add purchase" when you buy one.</div>'}`;
   $('ap-monthly').innerHTML=`
-    <div style="font-size:11px;color:var(--mut);margin-bottom:8px">Scope: <b style="color:var(--acc)">${d.scopeLabel}</b></div>
+    <div style="font-size:11px;color:var(--mut);margin-bottom:8px">${(getBiz().company||'')}${truckLabel()} · Scope: <b style="color:var(--acc)">${d.scopeLabel}</b></div>
     <div class="g3" style="margin-bottom:12px">
       <div class="sc"><div class="sl">Gross Income</div><div class="sv" style="color:var(--grn)">${fmt(d.income)}</div>${d.reimbMonth>0?`<div class="sch">+ ${fmt(d.reimbMonth)} reimbursements (offset matching expenses)</div>`:''}</div>
       <div class="sc"><div class="sl">Deductible Expenses</div><div class="sv" style="color:var(--red)">${fmt(d.total)}</div></div>
@@ -2944,7 +2953,7 @@ function exportAcctExcel(fullYear){
   let grand=0,grandInc=0;
   months.forEach(mo=>{
     const d=acctMonthData(mo);grand+=d.total;grandInc+=d.income;
-    html+=`<table border="1"><tr><td colspan="5" style="font-size:16px;font-weight:bold">${biz.company} — ${MONTH_LABEL(mo)} — ${d.scopeLabel}</td></tr>
+    html+=`<table border="1"><tr><td colspan="5" style="font-size:16px;font-weight:bold">${biz.company}${truckLabel()} — ${MONTH_LABEL(mo)} — ${d.scopeLabel}</td></tr>
     <tr><td colspan="5"></td></tr>
     ${d.lumpers.length?`<tr style="font-weight:bold;background:#fef3c7"><td colspan="5">LUMPER FEES</td></tr>
     <tr style="font-weight:bold"><td>Date</td><td colspan="2">Description</td><td>Type</td><td>Amount</td></tr>
@@ -2952,7 +2961,7 @@ function exportAcctExcel(fullYear){
     <tr><td colspan="5"></td></tr>`:''}
     <tr style="font-weight:bold;background:#dbeafe"><td>Category</td><td>Date</td><td>Description</td><td>Paid with</td><td>Amount</td></tr>`;
     Object.entries(d.cats).sort((a,b)=>b[1].total-a[1].total).forEach(([cat,v])=>{
-      v.items.forEach((i,ix)=>{const hl=i.personal?' style="background:#fef3c7"':'';html+=`<tr${hl}><td>${ix===0?cat:''}</td><td>${i.date||''}</td><td>${(i.desc||'').replace(/</g,'')}${i.personal?' [OWNER PAID]':''}</td><td>${i.personal?('💰 '+(i.payment||'Personal')):(i.payment||i.src)}</td><td>${i.amount.toFixed(2)}</td></tr>`;});
+      v.items.forEach((i,ix)=>{const hl=i.personal?' style="background:#fef3c7"':'';html+=`<tr${hl}><td style="font-weight:bold">${ix===0?cat:''}</td><td>${i.date||''}</td><td>${(i.desc||'').replace(/</g,'')}${i.personal?' [OWNER PAID]':''}</td><td>${i.personal?('💰 '+(i.payment||'Personal')):(i.payment||i.src)}</td><td>${i.amount.toFixed(2)}</td></tr>`;});
       html+=`<tr style="font-weight:bold;background:#f1f5f9"><td></td><td></td><td>${cat} subtotal${SCHED_C[cat]?' — Schedule C line '+SCHED_C[cat]:''}</td><td>${v.items.length} items</td><td>${v.total.toFixed(2)}</td></tr>`;
     });
     html+=`<tr style="font-weight:bold;background:#fee2e2"><td colspan="4">TOTAL DEDUCTIBLE EXPENSES — ${MONTH_LABEL(mo)}</td><td>${d.total.toFixed(2)}</td></tr>
@@ -3014,7 +3023,7 @@ function exportAcctPDF(fullYear){
       ${d.lumpers.length?`<h3>Lumper Fees</h3><table><thead><tr><th>Date</th><th>Description</th><th>Type</th><th class="r-al">Amount</th></tr></thead><tbody>${d.lumpers.map(l=>`<tr><td>${esc(l.date)}</td><td>${esc(l.desc)}</td><td>${esc(l.kind)}</td><td class="r-al">${fmt(l.amount)}</td></tr>`).join('')}</tbody></table>`:''}
       <table><thead><tr><th style="width:30%">Category</th><th style="width:14%">Date</th><th>Description</th><th style="width:18%">Paid with</th><th style="width:14%" class="r-al">Amount</th></tr></thead><tbody>`;
     Object.entries(d.cats).sort((a,b)=>b[1].total-a[1].total).forEach(([cat,v])=>{
-      v.items.forEach((i,ix)=>{body+=`<tr${i.personal?' class="own"':''}><td>${ix===0?esc(cat):''}</td><td>${esc(i.date)}</td><td>${esc(i.desc)}${i.personal?' <b>[OWNER PAID]</b>':''}</td><td>${i.personal?'💰 '+esc(i.payment||'Personal'):esc(i.payment||i.src)}</td><td class="r-al">${fmt(i.amount)}</td></tr>`;});
+      v.items.forEach((i,ix)=>{body+=`<tr${i.personal?' class="own"':''}><td style="font-weight:700">${ix===0?esc(cat):''}</td><td>${esc(i.date)}</td><td>${esc(i.desc)}${i.personal?' <b>[OWNER PAID]</b>':''}</td><td>${i.personal?'💰 '+esc(i.payment||'Personal'):esc(i.payment||i.src)}</td><td class="r-al">${fmt(i.amount)}</td></tr>`;});
       body+=`<tr class="sub"><td></td><td></td><td>${esc(cat)} subtotal${SCHED_C[cat]?' — Schedule C line '+SCHED_C[cat]:''}</td><td>${v.items.length} items</td><td class="r-al">${fmt(v.total)}</td></tr>`;
     });
     body+=`</tbody><tfoot><tr class="tot"><td colspan="4">TOTAL DEDUCTIBLE EXPENSES</td><td class="r-al">${fmt(d.total)}</td></tr>${d.ownerPaid>0?`<tr class="own tot2"><td colspan="4">— of which paid personally by owner (Owner Contribution / capital in)</td><td class="r-al">${fmt(d.ownerPaid)}</td></tr>`:''}</tfoot></table>`;
@@ -3076,7 +3085,7 @@ function exportAcctPDF(fullYear){
     @page{margin:14mm}
   </style></head><body>
   <h1>${esc(biz.company)}</h1>
-  <div class="meta">Expense report for accountant${biz.ein?' · EIN '+esc(biz.ein):''} · generated ${new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})}</div>
+  <div class="meta">${esc(truckLabel().replace(/^ — /,''))}${biz.ein?' · EIN '+esc(biz.ein):''} · Expense report for accountant · generated ${new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})}</div>
   ${body}
   <footer>Meals are excluded (covered by the per diem deduction). Advance repayments (loan principal) and escrow/performance-bond deposits are excluded as non-deductible. Schedule C line numbers are shown next to each category subtotal as a transcription aid (21* = major overhauls, which may be a capital improvement rather than a Line 21 repair — your call). Capital Assets (blue) are vehicle/equipment purchases — depreciable assets, deliberately excluded from the expense totals. Rows marked <b>OWNER PAID</b> (amber) were paid with a personal card or cash and are recorded as Owner Contributions — capital contributed to the business, not company funds. Figures are from imported settlements and receipts — verify against source documents.</footer>
   </body></html>`);
