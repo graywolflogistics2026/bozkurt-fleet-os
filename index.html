@@ -144,7 +144,7 @@ canvas{max-height:160px;}
     <div class="ni" onclick="go('settings',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M5.64 5.64a10 10 0 0 1 0 13.13"/></svg>Settings</div>
   </div>
   <div class="suser"><div class="sav">AB</div><div class="sui">Ali Bozkurt<small>Graywolf Logistics</small></div></div>
-  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.08.05-D</div>
+  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.08.05-F</div>
 </div>
 <div id="main">
   <div id="readonly-banner" style="display:none;background:var(--org);color:#000;padding:6px 18px;align-items:center;gap:8px;font-size:12px;font-weight:600">👀 View-Only Mode — you're looking, not editing. Ask the owner for changes.</div>
@@ -1523,12 +1523,17 @@ function calcOperatingCost(){
   DB.maint.forEach(m=>{buckets.Maintenance+=Math.max(0,Number(m.total||0)-Number(m.covered||0));});
   (DB.tolls.ez||[]).concat(DB.tolls.dw||[]).forEach(t=>{buckets.Tolls+=Number(t.amount||0);});
   // Truck loan/lease payments belong in CPM; the purchase price never does.
-  (typeof LOANS!=='undefined'?LOANS:[]).forEach(l=>{
-    const pay=Number(l.payment||0);if(!(pay>0))return;
-    const weeks=DB.sett.length||0;
-    const per=/week/i.test(l.frequency||'')?pay*weeks:/month/i.test(l.frequency||'')?pay*(weeks/4.33):0;
-    if(per>0)buckets['Truck payment']+=per;
-  });
+  // Only estimate from the loan schedule when the carrier is NOT already
+  // withholding the payment — otherwise the same money lands twice.
+  const withheldTruckPay=buckets['Truck payment']>0;
+  if(!withheldTruckPay){
+    (typeof LOANS!=='undefined'?LOANS:[]).forEach(l=>{
+      const pay=Number(l.payment||0);if(!(pay>0))return;
+      const weeks=DB.sett.length||0;
+      const per=/week/i.test(l.frequency||'')?pay*weeks:/month/i.test(l.frequency||'')?pay*(weeks/4.33):0;
+      if(per>0)buckets['Truck payment']+=per;
+    });
+  }
   const capitalPurchases=(typeof getCapAssets==='function'?getCapAssets():[]).reduce((a,x)=>a+Number(x.price||0),0);
   excludedTotal+=capitalPurchases;
   const total=Object.values(buckets).reduce((a,v)=>a+v,0);
@@ -1557,11 +1562,17 @@ function go(id,el){
 // ═══ RENDER FUNCTIONS ═══
 function rDash(){
   const rev=DB.sett.reduce((a,x)=>a+(x.gross||0),0);
-  const ded=dedTotal();
-  const net=DB.sett.reduce((a,x)=>a+(x.net||0),0);
+  // One canonical expense figure everywhere: withheld + out-of-pocket, fuel,
+  // maintenance and tolls included, non-deductible rows excluded. dedTotal()
+  // alone missed fuel/maintenance/tolls and understated the total badly.
+  const ded=calcOperatingCost().total;
+  const carrierNet=DB.sett.reduce((a,x)=>a+(x.net||0),0);
+  const net=rev-ded; // TRUE profit — the carrier's net pay ignores what you paid yourself
   const mi=DB.sett.reduce((a,x)=>a+(x.miles||0),0);
   $('d-rev').textContent=fmt(rev);$('d-ded').textContent=fmt(ded);
   $('d-net').textContent=fmt(net);$('d-net').style.color=net>=0?'var(--grn)':'var(--red)';
+  $('d-net').title='Gross revenue '+fmt(rev)+' − all deductible expenses '+fmt(ded)+'\nCarrier net pay (what hit your account): '+fmt(carrierNet);
+  if($('d-ded'))$('d-ded').title='Withheld + out-of-pocket, including fuel, maintenance and tolls. Excludes meals (per diem), advance repayments and escrow.';
   $('d-miles').textContent=mi.toLocaleString();
   const last=DB.sett[DB.sett.length-1];
   if(last)$('d-lastsett').innerHTML=`<div class="cf"><span style="color:var(--mut)">Gross</span><span class="tg">${fmt(last.gross)}</span></div><div class="cf"><span style="color:var(--mut)">Reimb</span><span class="tg">+${fmt(last.reimb||0)}</span></div><div class="cf"><span style="color:var(--mut)">Deductions</span><span class="tr">-${fmt(last.ded||0)}</span></div><div class="cf" style="border-top:1px solid var(--bor);margin-top:4px"><b>Net</b><span style="color:var(--acc);font-size:15px;font-weight:700">${fmt(last.net)}</span></div>`;
@@ -2732,9 +2743,17 @@ function acctMonthData(mo,scopeArg){
   const PD_RATE=64; // $80 full rate, 80% deductible
   const perDiemAmt=perDiemDays*PD_RATE, ytdPerDiemAmt=ytdDays*PD_RATE;
   const total=Object.values(cats).reduce((a,x)=>a+x.total,0);
+  // Carrier reimbursements (lumper, tolls, scales, permits paid back to you) are
+  // income against the matching expense — showing the expense without them
+  // understates the month.
+  const reimbMonth=(DB.reimb||[]).filter(r=>inMo(r.date)).reduce((a,r)=>a+Number(r.amount||0),0);
   // Owner's equity movements for the month — contributions in, draws out.
   const eqContrib=(CAPITAL.extraContributions||[]).filter(x=>inMo(x.date));
   const eqDraws=(CAPITAL.draws||[]).filter(x=>inMo(x.date));
+  const eqCash=eqContrib.filter(x=>!x.sourceDeductionId);
+  const eqLinked=eqContrib.filter(x=>x.sourceDeductionId);
+  const eqCashTotal=eqCash.reduce((a,x)=>a+(x.amount||0),0);
+  const eqLinkedTotal=eqLinked.reduce((a,x)=>a+(x.amount||0),0);
   const eqContribTotal=eqContrib.reduce((a,x)=>a+(x.amount||0),0);
   const eqDrawTotal=eqDraws.reduce((a,x)=>a+(x.amount||0),0);
   const capAssets=getCapAssets().filter(a=>inMo(a.date));
@@ -2742,7 +2761,7 @@ function acctMonthData(mo,scopeArg){
   let ownerPaid=0;
   Object.values(cats).forEach(v=>v.items.forEach(i=>{if(i.personal)ownerPaid+=i.amount;}));
   const scopeLabel=scope==='oop'?'Out-of-pocket expenses only':scope==='sett'?'Settlement-withheld only':'All expenses combined';
-  return {month:mo,cats,total,lumpers,income,perDiemDays,perDiemAmt,ytdDays,ytdPerDiemAmt,ytdIncome,PD_RATE,scope,scopeLabel,ownerPaid,capAssets,capTotal,eqContrib,eqDraws,eqContribTotal,eqDrawTotal};
+  return {month:mo,cats,total,lumpers,income,perDiemDays,perDiemAmt,ytdDays,ytdPerDiemAmt,ytdIncome,PD_RATE,scope,scopeLabel,ownerPaid,capAssets,capTotal,eqContrib,eqDraws,eqContribTotal,eqDrawTotal,eqCash,eqLinked,eqCashTotal,eqLinkedTotal,reimbMonth};
 }
 // Fix a miscategorized row straight from the accountant report — no need to
 // hunt for it on the Deductions page before sending the file out.
@@ -2844,10 +2863,12 @@ function rAcctMonth(){
     </tbody></table>`:'';
   const eqBlock=(d.eqContrib.length||d.eqDraws.length||d.ownerPaid>0)?`<div class="ct" style="margin-top:14px">👤 Owner's Equity — not income, not expense</div>
     <table class="tb"><thead><tr><th>Date</th><th>Type</th><th>Description</th><th>Amount</th></tr></thead><tbody>
-    ${d.eqContrib.map(x=>`<tr style="background:rgba(34,197,94,.07)"><td>${fd(x.date)}</td><td style="color:var(--grn)">Capital contribution (in)</td><td>${x.desc||x.note||'Owner contribution'}</td><td class="tm" style="color:var(--grn)">${fmt(x.amount)}</td></tr>`).join('')}
+    ${d.eqCash.map(x=>`<tr style="background:rgba(34,197,94,.07)"><td>${fd(x.date)}</td><td style="color:var(--grn)">Cash contribution (in)</td><td>${x.desc||x.note||'Owner contribution'}</td><td class="tm" style="color:var(--grn)">${fmt(x.amount)}</td></tr>`).join('')}
+    ${d.eqLinked.map(x=>`<tr style="background:rgba(34,197,94,.04)"><td>${fd(x.date)}</td><td style="color:var(--grn)">Expense paid personally 🔗</td><td>${x.desc||x.note||'Owner contribution'} <span style="font-size:9px;color:var(--mut)">(same money as the OWNER PAID expense above — counted once)</span></td><td class="tm" style="color:var(--grn)">${fmt(x.amount)}</td></tr>`).join('')}
     ${d.eqDraws.map(x=>`<tr style="background:rgba(239,68,68,.07)"><td>${fd(x.date)}</td><td style="color:var(--red)">Owner's draw (out)</td><td>${x.desc||x.note||'Owner draw'}</td><td class="tm" style="color:var(--red)">${fmt(x.amount)}</td></tr>`).join('')}
     </tbody><tfoot>
-    <tr style="font-weight:700"><td colspan="3">Contributions this month${d.ownerPaid>0?' (cash '+fmt(d.eqContribTotal)+' + expenses paid personally '+fmt(d.ownerPaid)+')':''}</td><td class="tm" style="color:var(--grn)">${fmt(d.eqContribTotal+d.ownerPaid)}</td></tr>
+    <tr style="font-weight:700"><td colspan="3">Contributions this month — cash ${fmt(d.eqCashTotal)} + expenses paid personally ${fmt(d.eqLinkedTotal)}</td><td class="tm" style="color:var(--grn)">${fmt(d.eqCashTotal+d.eqLinkedTotal)}</td></tr>
+    ${Math.abs(d.ownerPaid-d.eqLinkedTotal)>0.01?`<tr><td colspan="4" style="font-size:10px;color:var(--org)">⚠️ ${fmt(Math.abs(d.ownerPaid-d.eqLinkedTotal))} of personally-paid expenses have no matching contribution recorded — open those rows on the Deductions page and confirm the Owner Contribution if they should count as capital.</td></tr>`:''}
     <tr style="font-weight:700"><td colspan="3">Draws this month</td><td class="tm" style="color:var(--red)">${fmt(d.eqDrawTotal)}</td></tr>
     </tfoot></table>
     <div style="font-size:10px;color:var(--mut);margin-top:4px">Post to owner's equity — capital contributions are not taxable income; draws are not wages or a deductible expense.</div>`:'';
@@ -2860,7 +2881,7 @@ function rAcctMonth(){
   $('ap-monthly').innerHTML=`
     <div style="font-size:11px;color:var(--mut);margin-bottom:8px">Scope: <b style="color:var(--acc)">${d.scopeLabel}</b></div>
     <div class="g3" style="margin-bottom:12px">
-      <div class="sc"><div class="sl">Gross Income</div><div class="sv" style="color:var(--grn)">${fmt(d.income)}</div></div>
+      <div class="sc"><div class="sl">Gross Income</div><div class="sv" style="color:var(--grn)">${fmt(d.income)}</div>${d.reimbMonth>0?`<div class="sch">+ ${fmt(d.reimbMonth)} reimbursements (offset matching expenses)</div>`:''}</div>
       <div class="sc"><div class="sl">Deductible Expenses</div><div class="sv" style="color:var(--red)">${fmt(d.total)}</div></div>
       <div class="sc"><div class="sl">Per Diem — this month</div><div class="sv">${d.perDiemDays} <span style="font-size:12px;color:var(--mut)">days</span></div><div class="sch">${fmt(d.perDiemAmt)} deductible @ $${d.PD_RATE}/day</div></div>
     </div>
@@ -2909,9 +2930,10 @@ function exportAcctExcel(fullYear){
     if(d.eqContrib.length||d.eqDraws.length||d.ownerPaid>0){
       html+=`<tr><td colspan="5"></td></tr><tr style="font-weight:bold;background:#dcfce7"><td colspan="5">OWNER'S EQUITY — not income, not expense</td></tr>
       <tr style="font-weight:bold"><td>Date</td><td>Type</td><td colspan="2">Description</td><td>Amount</td></tr>`;
-      d.eqContrib.forEach(x=>{html+=`<tr style="background:#f0fdf4"><td>${x.date||''}</td><td>Capital contribution (in)</td><td colspan="2">${(x.desc||x.note||'').replace(/</g,'')}</td><td>${(x.amount||0).toFixed(2)}</td></tr>`;});
+      d.eqCash.forEach(x=>{html+=`<tr style="background:#f0fdf4"><td>${x.date||''}</td><td>Cash contribution (in)</td><td colspan="2">${(x.desc||x.note||'').replace(/</g,'')}</td><td>${(x.amount||0).toFixed(2)}</td></tr>`;});
+      d.eqLinked.forEach(x=>{html+=`<tr style="background:#f7fee7"><td>${x.date||''}</td><td>Expense paid personally</td><td colspan="2">${(x.desc||x.note||'').replace(/</g,'')} (same money as the OWNER PAID expense line)</td><td>${(x.amount||0).toFixed(2)}</td></tr>`;});
       d.eqDraws.forEach(x=>{html+=`<tr style="background:#fef2f2"><td>${x.date||''}</td><td>Owner's draw (out)</td><td colspan="2">${(x.desc||x.note||'').replace(/</g,'')}</td><td>${(x.amount||0).toFixed(2)}</td></tr>`;});
-      html+=`<tr style="font-weight:bold;background:#dcfce7"><td colspan="4">Total contributions (cash ${d.eqContribTotal.toFixed(2)} + paid personally ${d.ownerPaid.toFixed(2)})</td><td>${(d.eqContribTotal+d.ownerPaid).toFixed(2)}</td></tr>
+      html+=`<tr style="font-weight:bold;background:#dcfce7"><td colspan="4">Total contributions (cash ${d.eqCashTotal.toFixed(2)} + paid personally ${d.eqLinkedTotal.toFixed(2)})</td><td>${(d.eqCashTotal+d.eqLinkedTotal).toFixed(2)}</td></tr>
       <tr style="font-weight:bold;background:#fee2e2"><td colspan="4">Total draws</td><td>${d.eqDrawTotal.toFixed(2)}</td></tr>`;
     }
     if(d.capAssets.length){
@@ -2965,9 +2987,10 @@ function exportAcctPDF(fullYear){
     if(d.eqContrib.length||d.eqDraws.length||d.ownerPaid>0){
       body+=`<h3 style="color:#15803d">Owner's Equity — not income, not expense</h3>
       <table><thead><tr><th>Date</th><th>Type</th><th>Description</th><th class="r-al">Amount</th></tr></thead><tbody>`;
-      d.eqContrib.forEach(x=>{body+=`<tr class="eqin"><td>${esc(x.date)}</td><td>Capital contribution (in)</td><td>${esc(x.desc||x.note)}</td><td class="r-al">${fmt(x.amount)}</td></tr>`;});
+      d.eqCash.forEach(x=>{body+=`<tr class="eqin"><td>${esc(x.date)}</td><td>Cash contribution (in)</td><td>${esc(x.desc||x.note)}</td><td class="r-al">${fmt(x.amount)}</td></tr>`;});
+      d.eqLinked.forEach(x=>{body+=`<tr class="eqin"><td>${esc(x.date)}</td><td>Expense paid personally</td><td>${esc(x.desc||x.note)} <i>(same money as the OWNER PAID expense line — counted once)</i></td><td class="r-al">${fmt(x.amount)}</td></tr>`;});
       d.eqDraws.forEach(x=>{body+=`<tr class="eqout"><td>${esc(x.date)}</td><td>Owner's draw (out)</td><td>${esc(x.desc||x.note)}</td><td class="r-al">${fmt(x.amount)}</td></tr>`;});
-      body+=`</tbody><tfoot><tr class="eqin" style="font-weight:700"><td colspan="3">Total contributions (cash ${fmt(d.eqContribTotal)} + expenses paid personally ${fmt(d.ownerPaid)})</td><td class="r-al">${fmt(d.eqContribTotal+d.ownerPaid)}</td></tr>
+      body+=`</tbody><tfoot><tr class="eqin" style="font-weight:700"><td colspan="3">Total contributions (cash ${fmt(d.eqCashTotal)} + expenses paid personally ${fmt(d.eqLinkedTotal)})</td><td class="r-al">${fmt(d.eqCashTotal+d.eqLinkedTotal)}</td></tr>
       <tr class="eqout" style="font-weight:700"><td colspan="3">Total draws</td><td class="r-al">${fmt(d.eqDrawTotal)}</td></tr></tfoot></table>
       <div style="font-size:10px;color:#555;margin:-4px 0 10px">Post to owner's equity — contributions are not taxable income; draws are not wages or a deductible expense.</div>`;
     }
