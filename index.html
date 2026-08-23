@@ -144,7 +144,7 @@ canvas{max-height:160px;}
     <div class="ni" onclick="go('settings',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M5.64 5.64a10 10 0 0 1 0 13.13"/></svg>Settings</div>
   </div>
   <div class="suser"><div class="sav">AB</div><div class="sui">Ali Bozkurt<small>Graywolf Logistics</small></div></div>
-  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.08.05-Q</div>
+  <div style="padding:4px 16px 10px;font-size:9px;color:var(--mut);opacity:.7">v2026.08.05-S</div>
 </div>
 <div id="main">
   <div id="readonly-banner" style="display:none;background:var(--org);color:#000;padding:6px 18px;align-items:center;gap:8px;font-size:12px;font-weight:600">👀 View-Only Mode — you're looking, not editing. Ask the owner for changes.</div>
@@ -164,7 +164,7 @@ canvas{max-height:160px;}
         <div class="sc"><div class="sl">Total Revenue</div><div class="sv tg" id="d-rev">$0.00</div><div class="sch">Import PDF to start</div></div>
         <div class="sc"><div class="sl">Total Deductions</div><div class="sv tr" id="d-ded">$0.00</div></div>
         <div class="sc"><div class="sl">Net to Owner</div><div class="sv" id="d-net">$0.00</div></div>
-        <div class="sc"><div class="sl">Miles Driven</div><div class="sv" id="d-miles">0</div></div>
+        <div class="sc" onclick="showMilesEditor()" style="cursor:pointer" title="Tap to edit miles"><div class="sl">Miles Driven ✏️</div><div class="sv" id="d-miles">0</div></div>
       </div>
       <div class="g4" style="margin-bottom:12px">
         <div class="sc"><div class="sl">YTD Per Diem Days</div><div class="sv ta" id="d-perdiem-days">0</div><div class="sch">days on road</div></div>
@@ -1533,7 +1533,7 @@ function editTruckCost(){
   const t=getTruckCost();
   const price=parseFloat((prompt('What did the truck cost? (purchase price, $)',t.purchasePrice||'')||'').replace(/[^0-9.]/g,''));
   if(!isFinite(price))return;
-  const fin=(prompt('Is it paid off or on a loan? Type: paid or loan',t.financing)||'').toLowerCase().trim();
+  const fin=(prompt('How do you hold the truck?\n\n  paid  = owned outright\n  loan  = bank/dealer loan you pay monthly\n  lease = lease or lease-purchase where the carrier withholds the payment from your settlement',t.financing)||'').toLowerCase().trim();
   if(!fin)return;
   let loanAmount=0,monthlyPayment=0,termMonths=t.termMonths,depMonths=t.depreciationMonths;
   if(fin==='loan'){
@@ -1545,7 +1545,8 @@ function editTruckCost(){
   }
   const wCost=parseFloat((prompt('Extended warranty / service contract cost ($, 0 if none)',t.warrantyCost||'0')||'').replace(/[^0-9.]/g,''))||0;
   const wMonths=wCost>0?(parseInt((prompt('Warranty term in months (e.g. 36)',t.warrantyMonths||36)||'').replace(/[^0-9]/g,''))||36):36;
-  saveTruckCost({purchasePrice:price,financing:fin==='loan'?'loan':'paid',loanAmount,monthlyPayment,termMonths,depreciationMonths:depMonths,warrantyCost:wCost,warrantyMonths:wMonths});
+  const mode=fin==='loan'?'loan':(fin==='lease'?'lease':'paid');
+  saveTruckCost({purchasePrice:price,financing:mode,loanAmount,monthlyPayment,termMonths,depreciationMonths:depMonths,warrantyCost:wCost,warrantyMonths:wMonths});
   rAll();
   alert('✅ Saved. Your cost per mile now spreads these over time instead of dumping them into one month.');
 }
@@ -1578,6 +1579,7 @@ function showCpmMath(){
     </div>
     <table class="tb"><thead><tr><th>Bucket</th><th>Total</th><th>Per mile</th></tr></thead><tbody>${rows||'<tr><td colspan="3" class="empty">No costs recorded</td></tr>'}</tbody></table>
     <div style="font-size:11px;color:var(--mut);margin-top:8px">
+      <b style="color:var(--tx)">Fixed ${fmt(cost.fixed)} · Variable ${fmt(cost.variable)}</b> — variable is ${totalMiles>0?'$'+(cost.variable/totalMiles).toFixed(2):'—'}/mi, so any load above that adds cash today; you need ${totalMiles>0?'$'+(cost.total/totalMiles).toFixed(2):'—'}/mi to cover everything.<br>
       Miles: <b>${_m.loaded.toLocaleString()}</b> loaded + <b>${_m.empty.toLocaleString()}</b> empty (deadhead ${_m.deadheadPct.toFixed(0)}%) = ${totalMiles.toLocaleString()} total.${_m.dupWeeks?` <span style="color:var(--org)">⚠️ ${_m.dupWeeks} duplicate settlement week(s) were ignored — delete them on the Settlements page.</span>`:''}<br>
       Fixed truck cost included: ${tc.financing==='loan'?fmt(tc.monthlyPayment)+'/mo loan payment':fmt(tc.purchasePrice/(tc.depreciationMonths||1))+'/mo (truck '+fmt(tc.purchasePrice)+' ÷ '+tc.depreciationMonths+' mo)'}${tc.warrantyCost>0?' + '+fmt(tc.warrantyCost/(tc.warrantyMonths||1))+'/mo warranty':''} × ${months.toFixed(1)} months of data.<br>
       Excluded one-off costs: ${fmt(cost.excludedTotal)} (vehicle purchases, advance repayments, escrow, meals).<br>
@@ -1611,6 +1613,43 @@ function setSettMiles(id,v){
 // Deadhead is real cost: you burn fuel and wear the truck running empty, so CPM
 // must divide by TOTAL miles. Loaded miles are tracked separately because rate
 // per LOADED mile is how brokers quote and how drivers judge a load.
+function getMilesOverride(){const v=parseFloat(localStorage.getItem('gw_miles_override')||'0');return isFinite(v)&&v>0?v:0;}
+function setMilesOverride(v){
+  if(guardReadOnly())return;
+  const n=parseInt(String(v).replace(/[^0-9]/g,''))||0;
+  if(n>0)localStorage.setItem('gw_miles_override',String(n));
+  else localStorage.removeItem('gw_miles_override');
+  rAll();showMilesEditor();
+}
+// Tap the Miles card to fix them: edit each week, or type one total if you'd
+// rather use your odometer / ELD figure than the statements.
+function showMilesEditor(){
+  const m=calcMiles(),ov=getMilesOverride();
+  const rows=DB.sett.slice().sort((a,b)=>String(b.weekEnding||b.date||'').localeCompare(String(a.weekEnding||a.date||''))).map(s=>`
+    <tr><td>${fd(s.weekEnding||s.date)}</td><td class="tm">${fmt(s.gross||0)}</td>
+    <td><input type="number" min="0" value="${s.miles||''}" placeholder="—" onchange="setSettMilesById('${s.id}',this.value);showMilesEditor()" style="width:92px;background:var(--c2);border:1px solid ${s.miles?'var(--bd)':'var(--org)'};color:var(--tx);border-radius:4px;padding:3px 5px;font-size:11px;text-align:right"></td></tr>`).join('');
+  const html=`<div class="card" style="max-width:560px;margin:0 auto">
+    <div class="ct">🛣️ Miles</div>
+    <div class="g3" style="margin-bottom:10px">
+      <div class="sc"><div class="sl">Total</div><div class="sv">${m.total.toLocaleString()}</div></div>
+      <div class="sc"><div class="sl">Loaded</div><div class="sv">${m.loaded.toLocaleString()}</div></div>
+      <div class="sc"><div class="sl">Empty (deadhead)</div><div class="sv">${m.empty.toLocaleString()} <span style="font-size:11px;color:var(--mut)">${m.deadheadPct.toFixed(0)}%</span></div></div>
+    </div>
+    ${ov>0?`<div style="background:rgba(245,158,11,.1);border:1px solid var(--org);border-radius:6px;padding:7px 10px;margin-bottom:10px;font-size:11px">Using your manual total of <b>${ov.toLocaleString()}</b> miles instead of the settlements' ${DB.sett.reduce((a,s)=>a+Number(s.miles||0),0).toLocaleString()}. <b style="color:var(--acc);cursor:pointer" onclick="setMilesOverride(0)">Use settlements instead</b></div>`:''}
+    <div style="font-size:11px;color:var(--mut);margin-bottom:6px">Per week — type the statement's total miles (loaded + empty). Orange boxes are missing.</div>
+    <table class="tb"><thead><tr><th>Week</th><th>Gross</th><th>Miles</th></tr></thead><tbody>${rows||'<tr><td colspan="3" class="empty">No settlements yet</td></tr>'}</tbody></table>
+    <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--bd)">
+      <div style="font-size:11px;color:var(--mut);margin-bottom:5px">Or set one total manually (odometer / ELD) — overrides the weekly figures:</div>
+      <input type="number" min="0" id="miles-ov-input" value="${ov||''}" placeholder="e.g. 13060" style="width:140px;background:var(--c2);border:1px solid var(--bd);color:var(--tx);border-radius:6px;padding:6px 8px;font-size:12px">
+      <button class="btn" style="font-size:11px;padding:5px 12px" onclick="setMilesOverride($('miles-ov-input').value)">Save total</button>
+    </div>
+    <button class="btn" style="margin-top:12px;width:100%" onclick="closeMilesEditor()">Done</button>
+  </div>`;
+  let o=$('miles-ov');
+  if(!o){o=document.createElement('div');o.id='miles-ov';o.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:9999;overflow:auto;padding:24px 12px';document.body.appendChild(o);}
+  o.innerHTML=html;o.style.display='block';
+}
+function closeMilesEditor(){const o=$('miles-ov');if(o)o.style.display='none';}
 function calcMiles(){
   const seen=new Set();let total=0,loaded=0,empty=0,dupWeeks=0;
   DB.sett.forEach(s=>{
@@ -1628,9 +1667,11 @@ function calcMiles(){
     total+=t;loaded+=kidLoaded;empty+=Math.max(kidEmpty,t-kidLoaded-kidEmpty>0?0:0);
     empty+=0;
   });
+  const ov=getMilesOverride();
+  if(ov>0)total=ov; // manual odometer/ELD total wins over the statements
   loaded=Math.min(loaded,total);
   empty=Math.max(total-loaded,0);
-  return {total,loaded,empty,dupWeeks,deadheadPct:total>0?(empty/total*100):0};
+  return {total,loaded,empty,dupWeeks,override:ov>0,deadheadPct:total>0?(empty/total*100):0};
 }
 function calcOperatingCost(){
   const buckets={Fuel:0,Maintenance:0,Insurance:0,'Permits/Taxes':0,Tolls:0,Other:0,'Truck payment':0};
@@ -1666,16 +1707,31 @@ function calcOperatingCost(){
   // • warranty/service contract: cost ÷ its term
   const tc=getTruckCost(), months=periodMonths();
   let fixedMonthly=0;
-  if(tc.financing==='loan'&&tc.monthlyPayment>0)fixedMonthly+=tc.monthlyPayment;
-  else if(tc.purchasePrice>0&&tc.depreciationMonths>0)fixedMonthly+=tc.purchasePrice/tc.depreciationMonths;
+  // THREE ownership modes, each with a different fixed cost:
+  // • lease / lease-purchase: the carrier withholds the payment weekly — it is
+  //   already in the deduction rows, so add NOTHING here (double-count guard).
+  // • loan: the monthly payment is the fixed cost (unless withheld).
+  // • paid off: spread the purchase price over the months you choose.
+  const withheldTruckPay=buckets['Truck payment']>0;
+  if(tc.financing==='lease'){
+    // nothing added — the withheld weekly lease payment already counts.
+  }else if(tc.financing==='loan'&&tc.monthlyPayment>0){
+    if(!withheldTruckPay)fixedMonthly+=tc.monthlyPayment;
+  }else if(tc.purchasePrice>0&&tc.depreciationMonths>0){
+    fixedMonthly+=tc.purchasePrice/tc.depreciationMonths;
+  }
   if(tc.warrantyCost>0&&tc.warrantyMonths>0)fixedMonthly+=tc.warrantyCost/tc.warrantyMonths;
-  // Don't double-count a payment the carrier already withholds.
-  if(buckets['Truck payment']>0&&tc.financing==='loan')fixedMonthly-=Math.min(fixedMonthly,tc.monthlyPayment);
   if(fixedMonthly>0)buckets['Truck payment']+=fixedMonthly*months;
   const total=Object.values(buckets).reduce((a,v)=>a+v,0);
   // Settlements that carry revenue but no miles silently inflate CPM.
   const missingMiles=DB.sett.filter(s=>Number(s.gross||0)>0&&!(Number(s.miles||0)>0)).length;
-  return {total,buckets,excludedTotal,missingMiles};
+  // FIXED = costs you carry whether the truck moves or not. VARIABLE = costs
+  // that only happen when you roll. Truckers plan with "fixed per week +
+  // variable per mile" — that's what makes a rate quotable.
+  const FIXED_BUCKETS=['Truck payment','Insurance','Permits/Taxes'];
+  let fixed=0,variable=0;
+  Object.entries(buckets).forEach(([k,v])=>{if(FIXED_BUCKETS.includes(k))fixed+=v;else variable+=v;});
+  return {total,buckets,excludedTotal,missingMiles,fixed,variable};
 }
 function dedTotal(){return DB.ded.reduce((a,x)=>a+(x.taxDeductible===false?0:(x.amount||0)),0);}
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,5);
@@ -2486,7 +2542,9 @@ function rAssets(){
       $('truck-cost-summary').innerHTML='<span style="color:var(--org)">Not set — tap Edit so your cost per mile includes the truck.</span>';
     }else{
       const rows=[];
-      if(_tc.financing==='loan'){
+      if(_tc.financing==='lease'){
+        rows.push('Truck: <b>lease / lease-purchase</b> — the carrier withholds your payment weekly, so it counts automatically from the settlements (nothing added twice).');
+      }else if(_tc.financing==='loan'){
         rows.push('Truck: '+fmt(_tc.purchasePrice)+' · <b>loan</b> '+fmt(_tc.monthlyPayment)+'/mo'+(_tc.termMonths?' × '+_tc.termMonths+' mo':''));
       }else{
         rows.push('Truck: '+fmt(_tc.purchasePrice)+' · <b>paid off</b> — spread over '+_tc.depreciationMonths+' mo = '+fmt(_tc.purchasePrice/(_tc.depreciationMonths||1))+'/mo');
